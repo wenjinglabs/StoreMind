@@ -9,6 +9,9 @@ services:
       dockerfile: deploy/Dockerfile
     image: storemind:local
     container_name: storemind-app
+    labels:
+      com.storemind.name: 应用
+      com.storemind.desc: 网页 + API（8000）
     ports:
       - "8000:8000"
     environment: &app-env
@@ -35,6 +38,9 @@ services:
   mcp:
     image: storemind:local
     container_name: storemind-mcp
+    labels:
+      com.storemind.name: 接口
+      com.storemind.desc: MCP server（8765）
     command: ["python", "scripts/mcp_server.py", "--http", "8765", "--host", "0.0.0.0"]
     ports:
       - "8765:8765"
@@ -59,6 +65,9 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     container_name: storemind-pg
+    labels:
+      com.storemind.name: 数据库
+      com.storemind.desc: PostgreSQL + pgvector（5433）
     environment:
       POSTGRES_USER: storemind
       POSTGRES_PASSWORD: storemind

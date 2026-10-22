@@ -115,6 +115,26 @@ SM_EMBED_BACKEND=ollama SM_LLM_BACKEND=ollama \
 > Docker Desktop 需要 WSL2，且 `bcdedit` 的 `hypervisorlaunchtype` 必须是 `auto`。
 > 本机安装时踩过 `no virtualization available`，记录在 HANDOVER 6.11。
 
+### 把 Ollama 也放进 Docker
+
+Docker 的服务名/容器名只允许 ASCII（`[a-zA-Z0-9][a-zA-Z0-9_.-]`），所以底层服务名仍是
+`app` / `mcp` / `postgres` / `ollama`；每个容器加了中文 label，配一个中文快捷脚本：
+
+```powershell
+.\scripts\docker.ps1 启动        # PG + 应用 + 接口（hashing + none，不拉模型）
+.\scripts\docker.ps1 启动模型    # 额外起 ollama，并拉 bge-m3 / qwen2.5:7b
+.\scripts\docker.ps1 状态        # 中文 label：应用 / 接口 / 数据库 / 模型
+.\scripts\docker.ps1 日志 应用
+.\scripts\docker.ps1 停止
+```
+
+模型服务用 `deploy/docker-compose.ollama.yml` 叠加：
+
+- 容器内地址 `http://ollama:11434`，宿主端口 `11435`（避免和宿主机已有 ollama 冲突）
+- 模型放在命名卷 `ollama-models`，首次拉取约 6GB，之后复用
+- `ollama-init` 是 one-shot 服务，拉完 `bge-m3` 和 `qwen2.5:7b` 后 app 才启动
+- 需要 Docker Desktop 的代理能访问 Docker Hub；GPU 支持时可在 override 里打开 `gpus: all`
+
 ### 命令行
 
 ```bash
@@ -618,12 +638,13 @@ scripts/
   mcp_server.py        MCP server 启动入口（不依赖 cwd）
   mcp_smoke_test.py    MCP 协议冒烟：握手 / 通知 / 工具 / 资源 / 三类错误码
   verify_docker.py     Docker 部署验证：app 三个接口 + MCP 四个方法 + 工作流
+  docker.ps1           中文 Docker 快捷命令（启动 / 启动模型 / 状态 / 日志）
   workflow_test.py     工作流：提案/确认/越权/幂等/审计
   dump_prompt.py       导出真实 prompt 排查
   dump_chunks.py       导出语料切片结果，定位某句话落在哪一段
   dump_judge.py        导出 judge 模型的原始输出，查解析失败
   setup_local.bat      一键起 ollama + 拉模型 + 建索引
-deploy/                docker-compose（PG + app + MCP）与 pgvector schema
+deploy/                docker-compose（PG + app + MCP）、ollama override 与 pgvector schema
 mcp.example.json       MCP 客户端配置示例
 ```
 
