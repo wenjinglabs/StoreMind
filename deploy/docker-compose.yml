@@ -1,0 +1,43 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: storemind-app
+    ports:
+      - "8000:8000"
+    environment:
+      # 嵌入：默认用宿主机上的 ollama（Windows 上是 host.docker.internal）
+      # 想在容器内零依赖跑，把 SM_EMBED_BACKEND 换成 hashing
+      SM_EMBED_BACKEND: ${SM_EMBED_BACKEND:-ollama}
+      SM_EMBED_MODEL: ${SM_EMBED_MODEL:-bge-m3}
+      SM_LLM_BACKEND: ${SM_LLM_BACKEND:-ollama}
+      SM_LLM_MODEL: ${SM_LLM_MODEL:-qwen2.5:7b}
+      SM_LLM_TIMEOUT: ${SM_LLM_TIMEOUT:-60}
+      SM_OLLAMA_BASE: ${SM_OLLAMA_BASE:-http://host.docker.internal:11434}
+    extra_hosts:
+      # 让容器内的 host.docker.internal 指向宿主机（Linux 上需要显式声明）
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../data:/app/data
+      - ../corpus:/app/corpus:ro
+    restart: unless-stopped
+
+  # 迁移用，不参与当前版本运行。启动：docker compose --profile pg up -d
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: storemind-pg
+    profiles: ["pg"]
+    environment:
+      POSTGRES_USER: storemind
+      POSTGRES_PASSWORD: storemind
+      POSTGRES_DB: storemind
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./pgvector_init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    restart: unless-stopped
+
+volumes:
+  pgdata:

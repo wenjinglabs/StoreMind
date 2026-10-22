@@ -1,0 +1,33 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 运行时产物：索引库、checkpointer、经营数据（都由脚本重新生成）
+data/*.sqlite3
+data/*.sqlite3-shm
+data/*.sqlite3-wal
+data/*.log
+data/ops.sqlite3
+data/storemind.sqlite3
+data/checkpoints.sqlite3
+
+# 早期环境探测残留，无用
+_probe.txt
+
+# 临时探测文件（脚本自己写的中间产物，data/ 下的正式报告要提交）
+data/_*
+data/dump_prompt.py
+scripts/_*
+
+# 环境配置（含 API key，绝不能提交）
+.env
+.env.local
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

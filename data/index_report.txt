@@ -1,0 +1,17 @@
+corpus      : <项目路径>\corpus
+embedder    : hashing (dim=512)
+chunk 参数  : 200~450 字, overlap 60
+新索引文档  : 8
+新索引片段  : 45
+跳过未变更  : 0
+索引总量    : docs=8 chunks=45 terms=3664
+
+每篇文档:
+  [重建] product/01-酒水知识与出品标准.md                  chunks=5
+  [重建] product/02-库存盘点与损耗管理.md                  chunks=6
+  [重建] rules/01-会员卡与储值规则.md                     chunks=7
+  [重建] rules/02-活动核销规则.md                       chunks=6
+  [重建] rules/03-抖音探店内容规范.md                     chunks=6
+  [重建] sop/01-新人入职第一周.md                        chunks=5
+  [重建] sop/02-开档与闭档流程.md                        chunks=4
+  [重建] sop/03-客诉处理手册.md                         chunks=6
