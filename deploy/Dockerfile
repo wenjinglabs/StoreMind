@@ -6,6 +6,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
+# 依赖单独一层：改代码不会触发重新装包
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
@@ -14,14 +15,15 @@ COPY scripts ./scripts
 COPY corpus ./corpus
 COPY eval ./eval
 
-# 索引不在镜像构建期生成。
-# 默认嵌入后端是 ollama，构建时容器里没有 ollama 服务，连不上会失败。
-# 改成容器启动时建（见 CMD）。
-ENV SM_EMBED_BACKEND=${SM_EMBED_BACKEND:-hashing}
+# 默认零依赖：不需要 GPU、不需要宿主机 ollama，镜像自己就能建索引并作答。
+# 要接本地模型，在 compose 里覆盖 SM_EMBED_BACKEND=ollama / SM_LLM_BACKEND=ollama，
+# 并把 SM_OLLAMA_BASE 指向宿主机（见 docker-compose.yml）。
+ENV SM_EMBED_BACKEND=hashing \
+    SM_LLM_BACKEND=none
 
-EXPOSE 8000
+EXPOSE 8000 8765
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3).status==200 else 1)"
 
 # 启动时先建经营数据和索引，再起服务。

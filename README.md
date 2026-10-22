@@ -64,6 +64,47 @@ uvicorn app.main:app --reload --port 8000
 嵌入走自实现的字符 n-gram 哈希，生成走抽取式兜底。
 不装 PostgreSQL、不拉模型也能完整看到检索链路——这是 CI 和回归测试用的配置。
 
+### 方式三：Docker（不装 Python、不需要模型）
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+# 网页 http://127.0.0.1:8000/ · MCP http://127.0.0.1:8765/mcp
+
+python scripts/verify_docker.py      # 部署验证 8/8
+```
+
+默认是零依赖模式（`hashing + none`）：镜像自带 8 篇语料，启动时自动建经营库和索引，
+不需要 GPU、不需要宿主机 ollama。要接宿主机上的 ollama（答案质量更好）：
+
+```powershell
+# PowerShell
+$env:SM_EMBED_BACKEND="ollama"; $env:SM_LLM_BACKEND="ollama"
+docker compose -f deploy/docker-compose.yml up -d --wait
+python scripts/verify_docker.py --expect-embed ollama --expect-llm ollama
+```
+
+```bash
+# bash
+SM_EMBED_BACKEND=ollama SM_LLM_BACKEND=ollama \
+  docker compose -f deploy/docker-compose.yml up -d --wait
+```
+
+本机实测（Docker 29.9.2，镜像 305MB，`scripts/verify_docker.py` 可复现）：
+
+| 配置 | /health | 规则题 | 数据题 | MCP |
+|---|---|---|---|---|
+| hashing + none | docs=8 chunks=45 | 引用 5 段，抽取式 477 字 | `store_sales` revenue=51115.0 | 8/8 |
+| ollama + qwen2.5:7b | docs=8 chunks=45 | 引用 5 段，生成 63 字，首次 6.1s | `store_sales` revenue=51115.0 | 8/8 |
+
+两个实现细节：
+
+- 容器数据用命名卷 `deploy_storemind-data`，不挂宿主机 `data/`——本地开发用 bge-m3 索引，
+  容器默认 hashing，混用会互相覆盖嵌入器签名（见第 8 条设计决策）。
+- `mcp` 服务等 `app` 健康后再启动，避免两个进程同时初始化 SQLite。
+
+> Docker Desktop 需要 WSL2，且 `bcdedit` 的 `hypervisorlaunchtype` 必须是 `auto`。
+> 本机安装时踩过 `no virtualization available`，记录在 HANDOVER 6.11。
+
 ### 命令行
 
 ```bash
@@ -76,6 +117,7 @@ python scripts/eval.py                    # 跑金标集，出 recall@k
 python scripts/compare_orchestration.py   # 手写编排 vs LangGraph 等价性 + 多轮演示
 python scripts/verify_e2e.py              # 真模型端到端验证（11 条用例）
 python scripts/mcp_smoke_test.py          # MCP 协议冒烟（stdio，12 项检查）
+python scripts/verify_docker.py           # Docker 部署验证（app + MCP，8 项检查）
 ```
 
 多轮会话（同一 `thread_id` 共享上下文）：
@@ -537,6 +579,7 @@ scripts/
   verify_e2e.py        真模型端到端验证（走 HTTP，11 条用例）
   mcp_server.py        MCP server 启动入口（不依赖 cwd）
   mcp_smoke_test.py    MCP 协议冒烟：握手 / 通知 / 工具 / 资源 / 三类错误码
+  verify_docker.py     Docker 部署验证：app 三个接口 + MCP 四个方法
   dump_prompt.py       导出真实 prompt 排查
   dump_chunks.py       导出语料切片结果，定位某句话落在哪一段
   dump_judge.py        导出 judge 模型的原始输出，查解析失败
@@ -557,6 +600,8 @@ mcp.example.json       MCP 客户端配置示例
       A/B 对照 recall@1 +8.3 个点、答案正确率零回退、延迟 +16ms
 - [x] **自写 MCP server**：自己实现 JSON-RPC 2.0 与 MCP 握手，暴露 8 个工具 + 8 篇语料资源，
       stdio / HTTP 两种传输，协议冒烟 12/12（含零依赖模式）
+- [x] **Docker 化**：零依赖默认配置，`docker compose up` 同时起 app 和 MCP；
+      镜像 305MB，部署验证 8/8（hashing + none / ollama 各测一次）
 - [ ] Redis 语义缓存：query embedding 相似度 > 0.95 直接返回
 - [ ] 加 rerank 模型（bge-reranker），解决 top1 排序不理想这个最大短板
 - [ ] LLM 版指代消解：当前「那退卡呢」靠规则借上文，复杂追问会失效

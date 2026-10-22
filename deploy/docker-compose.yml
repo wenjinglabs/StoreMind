@@ -1,17 +1,20 @@
 services:
+  # 默认配置是零依赖：不需要 ollama、不需要 GPU，clone 下来 up 就能问答。
+  # 要接宿主机上的本地模型：
+  #   PowerShell: $env:SM_EMBED_BACKEND="ollama"; $env:SM_LLM_BACKEND="ollama"; docker compose up -d
+  #   bash:       SM_EMBED_BACKEND=ollama SM_LLM_BACKEND=ollama docker compose up -d
   app:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+    image: storemind:local
     container_name: storemind-app
     ports:
       - "8000:8000"
-    environment:
-      # 嵌入：默认用宿主机上的 ollama（Windows 上是 host.docker.internal）
-      # 想在容器内零依赖跑，把 SM_EMBED_BACKEND 换成 hashing
-      SM_EMBED_BACKEND: ${SM_EMBED_BACKEND:-ollama}
+    environment: &app-env
+      SM_EMBED_BACKEND: ${SM_EMBED_BACKEND:-hashing}
       SM_EMBED_MODEL: ${SM_EMBED_MODEL:-bge-m3}
-      SM_LLM_BACKEND: ${SM_LLM_BACKEND:-ollama}
+      SM_LLM_BACKEND: ${SM_LLM_BACKEND:-none}
       SM_LLM_MODEL: ${SM_LLM_MODEL:-qwen2.5:7b}
       SM_LLM_TIMEOUT: ${SM_LLM_TIMEOUT:-60}
       SM_OLLAMA_BASE: ${SM_OLLAMA_BASE:-http://host.docker.internal:11434}
@@ -19,8 +22,33 @@ services:
       # 让容器内的 host.docker.internal 指向宿主机（Linux 上需要显式声明）
       - "host.docker.internal:host-gateway"
     volumes:
-      - ../data:/app/data
+      - storemind-data:/app/data
       - ../corpus:/app/corpus:ro
+    restart: unless-stopped
+
+  # 同一个镜像，换个入口：MCP server 走 HTTP，供任意 MCP 客户端或 curl 调用。
+  # 等 app 建完索引再起，避免两个进程同时初始化 SQLite。
+  mcp:
+    image: storemind:local
+    container_name: storemind-mcp
+    command: ["python", "scripts/mcp_server.py", "--http", "8765", "--host", "0.0.0.0"]
+    ports:
+      - "8765:8765"
+    environment: *app-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - storemind-data:/app/data
+      - ../corpus:/app/corpus:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8765/health',timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     restart: unless-stopped
 
   # 迁移用，不参与当前版本运行。启动：docker compose --profile pg up -d
@@ -41,3 +69,6 @@ services:
 
 volumes:
   pgdata:
+  # 容器自己的索引和经营库。不挂宿主机 data/：
+  # 本地开发用的是 bge-m3 索引，容器默认 hashing，混用会互相覆盖嵌入器签名。
+  storemind-data:

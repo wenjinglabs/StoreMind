@@ -51,6 +51,16 @@ python scripts/mcp_server.py --http 8765    # HTTP 传输，便于 curl / 容器
 python scripts/mcp_smoke_test.py            # 协议冒烟，12/12
 ```
 
+**Docker（app + MCP 同时起）**：
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+python scripts/verify_docker.py             # 部署验证，8/8
+```
+
+默认零依赖（hashing + none）；接宿主机 ollama 时在 compose 前设
+`SM_EMBED_BACKEND=ollama` / `SM_LLM_BACKEND=ollama`，见 README「方式三」。
+
 **打开 `http://127.0.0.1:8121/` 是可以直接对话的网页**，
 `/docs` 是 FastAPI 自动生成的接口文档。
 
@@ -77,6 +87,7 @@ python scripts/mcp_smoke_test.py          # MCP 协议冒烟，12 项；加 --ze
 | 冒烟 | 5/5 |
 | 端到端 | 11/11 无思考泄漏 |
 | MCP 协议冒烟 | 12/12（含零依赖模式） |
+| Docker 部署验证 | 8/8（hashing + none 与 ollama 各一次） |
 
 ---
 
@@ -90,6 +101,7 @@ python scripts/mcp_smoke_test.py          # MCP 协议冒烟，12 项；加 --ze
 | qwen2.5:7b | 4.7GB | 已 pull |
 | qwen3:4b | 2.5GB | 已 pull（**不要用它生成**，见第 6 节） |
 | GPU | RTX 5060 8GB | 架构 sm_120，ollama 官方支持 |
+| Docker | 29.9.2 / Desktop 4.96.1 | WSL2 后端，`hypervisorlaunchtype=Auto` |
 
 关键包：fastapi 0.159.1 / uvicorn 0.54.0 / pydantic 2.14.1 / httpx 0.28.1 /
 langgraph 1.2.16 / langgraph-checkpoint-sqlite 3.1.2
@@ -263,6 +275,20 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 现在 `graph.py` 里显式传了 `JsonPlusSerializer(allowed_msgpack_modules=[...])`。
 **别删这两行**——新版 langgraph 会从警告变成直接拒绝，表现是「会话历史读不出来」。
 
+### 6.11 Docker 起不来：`no virtualization available`
+
+这台机器装 Docker Desktop 时踩了两层：
+
+1. `wsl --install --no-distribution` 装完仍报 `no virtualization available`。
+   查 `Get-ComputerInfo` / `systeminfo` 发现 `HypervisorPresent=False`，而功能项其实都是 Enabled。
+2. 根因是启动配置：`bcdedit /enum {current}` 里 `hypervisorlaunchtype Off`。
+   管理员执行 `bcdedit /set hypervisorlaunchtype auto` 并重启，`HypervisorPresent` 变 True，
+   Docker 才真正启动。
+
+另有一个部署隔离的坑：compose 里**不要**把宿主机 `data/` 挂进容器。
+本地开发用 bge-m3 索引，容器默认 hashing，`build_index.py` 检测到签名变化会在共享目录里重建，
+两边的索引会互相覆盖。现在容器用命名卷 `deploy_storemind-data`。
+
 ---
 
 ## 7. 接下来做什么
@@ -272,7 +298,7 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 | 优先 | 事项 | 为什么 | 预估 |
 |---|---|---|---|
 | **P0** | **MCP server（自己写协议实现）** | ✅ 2026-10-22 已完成：8 个工具 + 语料资源，stdio/HTTP，协议冒烟 12/12 | 半天 |
-| **P0** | **Docker 化 + 部署 + 录 3 分钟屏** | 兑现「5 分钟能在你机器上跑起来」；这家公司 13 人，面试官大概率是技术负责人，他最看重这个 | 1 天 |
+| **P0** | **Docker 化 + 部署 + 录 3 分钟屏** | ✅ 2026-10-22 Docker 部分完成：零依赖默认 + MCP 服务，部署验证 8/8；**录屏还没做** | 1 天 |
 | **P0** | **改简历** | **10.27 死线**，代码再好简历上只有一行字也白搭 | 半天 |
 | P1 | 两篇博客（切片对照实验 / 评估集怎么建） | 加分项第 5 条，成本极低 | 1 天 |
 | P1 | 语料扩到 20 篇 + 切片对照实验 | 现有 45 个 chunk 太小，混合检索的两路互补性体现不出来 | 1 天 |
@@ -356,6 +382,8 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 - ❌ 别在没跑完四个验证命令前说「改好了」
 - ❌ 别删 `scripts/mcp_smoke_test.py` 和 `data/mcp_report*.txt`——MCP 是自己写的协议，
       这两份报告是「协议实现正确」的唯一证据
+- ❌ 别删 `scripts/verify_docker.py` 和 `data/docker_verify*.txt`——Docker 部署的唯一实测证据
+- ❌ 别把容器数据挂回宿主机 `data/`——索引签名会互相覆盖，见 6.11
 - ❌ 别擅自删文件、删字段、删测试数据
 
 ---
