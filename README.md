@@ -91,7 +91,7 @@ SM_EMBED_BACKEND=ollama SM_LLM_BACKEND=ollama \
   docker compose -f deploy/docker-compose.yml up -d --wait
 ```
 
-本机实测（Docker 29.9.2，镜像 305MB，`scripts/verify_docker.py` 可复现）：
+本机实测（Docker 29.9.2，镜像 334MB，`scripts/verify_docker.py` 可复现）：
 
 | 配置 | /health | 规则题 | 数据题 | MCP |
 |---|---|---|---|---|
@@ -624,7 +624,7 @@ mcp.example.json       MCP 客户端配置示例
 - [x] **自写 MCP server**：自己实现 JSON-RPC 2.0 与 MCP 握手，暴露 8 个工具 + 8 篇语料资源，
       stdio / HTTP 两种传输，协议冒烟 12/12（含零依赖模式）
 - [x] **Docker 化**：零依赖默认配置，`docker compose up` 同时起 app 和 MCP；
-      镜像 305MB，部署验证 8/8（hashing + none / ollama 各测一次）
+      镜像 334MB，部署验证 8/8（hashing + none / ollama 各测一次）
 - [x] **PostgreSQL + pgvector 迁移**：HNSW 索引，知识库与经营数据同库；
       SQLite 保留为零依赖后端，迁移对照 4/4（top1 24/24、召回集合 24/24、工具 5/5）
 - [ ] Redis 语义缓存：query embedding 相似度 > 0.95 直接返回
