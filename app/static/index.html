@@ -214,6 +214,65 @@
     background: var(--coral-bg); border: 1px solid #EFC3B5; color: var(--coral);
     padding: 11px 14px; border-radius: 9px; font-size: 13px; margin-bottom: 16px;
   }
+
+  /* ---------- 操作提案 ---------- */
+  .modal {
+    position: fixed; inset: 0; z-index: 50; display: none;
+    align-items: center; justify-content: center; padding: 20px;
+    background: rgba(44,44,42,.28); backdrop-filter: blur(2px);
+  }
+  .modal.open { display: flex; }
+  .modal-card {
+    width: min(660px, 100%); max-height: 86vh; overflow: auto;
+    background: var(--panel); border: 1px solid var(--border-strong);
+    border-radius: 16px; box-shadow: 0 20px 60px rgba(44,44,42,.18);
+    padding: 20px 22px 18px;
+  }
+  .wf-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .wf-head h2 { font-size: 17px; font-weight: 600; }
+  .wf-head .close { margin-left: auto; }
+  .wf-sub { color: var(--muted); font-size: 12.5px; margin-bottom: 14px; }
+  .wf-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .wf-tab {
+    border: 1px solid var(--border-strong); background: var(--panel); color: var(--muted);
+    border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 12.5px; cursor: pointer;
+  }
+  .wf-tab.on { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .wf-form { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 12px; margin-bottom: 10px; }
+  .wf-form .full { grid-column: 1 / -1; }
+  .wf-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .wf-form input, .wf-form select, .wf-form textarea {
+    font: inherit; font-size: 13.5px; color: var(--text);
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    padding: 6px 9px; background: var(--panel); outline: none;
+  }
+  .wf-form input:focus, .wf-form select:focus, .wf-form textarea:focus { border-color: var(--accent); }
+  .wf-form textarea { resize: vertical; min-height: 58px; }
+  .wf-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .wf-row .hint { font-size: 11.5px; color: var(--hint); }
+  .btn-primary, .btn-ghost {
+    font: inherit; font-size: 13px; border-radius: 8px; padding: 7px 14px; cursor: pointer;
+  }
+  .btn-primary { border: none; background: var(--accent); color: #fff; }
+  .btn-primary:hover { opacity: .88; }
+  .btn-ghost { border: 1px solid var(--border-strong); background: var(--panel); color: var(--muted); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .wf-msg { font-size: 12.5px; margin: 8px 0; min-height: 18px; color: var(--muted); }
+  .wf-msg.bad { color: var(--coral); }
+  .wf-list { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; display: grid; gap: 8px; }
+  .wf-card {
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+    background: #FCFCFA;
+  }
+  .wf-card .t { font-size: 13.5px; font-weight: 500; }
+  .wf-card .m { font-size: 11.5px; color: var(--hint); margin-top: 2px; }
+  .wf-card .acts { display: flex; gap: 6px; margin-top: 7px; }
+  .badge {
+    display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+    background: var(--amber-bg); color: var(--amber); border: 1px solid #F0D28A;
+    margin-left: 6px; vertical-align: 1px;
+  }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -246,6 +305,60 @@
   </footer>
 </div>
 
+<div class="modal" id="wfModal">
+  <div class="modal-card">
+    <div class="wf-head">
+      <h2>操作提案</h2>
+      <button class="btn-ghost close" id="wfClose">关闭</button>
+    </div>
+    <div class="wf-sub">写操作不会由模型直接执行：先生成提案，确认后才落库；补货需要店长确认。</div>
+
+    <div class="wf-tabs">
+      <button class="wf-tab on" data-kind="ticket">客诉工单</button>
+      <button class="wf-tab" data-kind="restock">补货申请</button>
+    </div>
+
+    <div class="wf-form">
+      <label>门店
+        <select id="wfStore">
+          <option>广州天河店</option>
+          <option>广州珠江新城店</option>
+          <option>深圳福田店</option>
+          <option>佛山祖庙店</option>
+        </select>
+      </label>
+      <label>角色（确认时使用）
+        <select id="wfRole">
+          <option value="clerk">店员 clerk</option>
+          <option value="manager">店长 manager</option>
+        </select>
+      </label>
+      <label class="full" id="wfCatWrap">客诉分类
+        <input id="wfCategory" value="酒水品质">
+      </label>
+      <label class="full" id="wfSummaryWrap">客诉摘要
+        <textarea id="wfSummary" placeholder="例如：客人反映酒有异味，要求处理"></textarea>
+      </label>
+      <label id="wfItemWrap" hidden>品项
+        <input id="wfItem" value="莫吉托">
+      </label>
+      <label id="wfQtyWrap" hidden>数量
+        <input id="wfQty" type="number" min="1" value="20">
+      </label>
+      <label id="wfUnitWrap" hidden>单位
+        <input id="wfUnit" value="份">
+      </label>
+    </div>
+
+    <div class="wf-row">
+      <button class="btn-primary" id="wfPropose">生成提案</button>
+      <span class="hint">店员可确认工单；补货需切到店长。</span>
+    </div>
+    <div class="wf-msg" id="wfMsg"></div>
+    <div class="wf-list" id="wfList"></div>
+  </div>
+</div>
+
 <script>
 const EXAMPLES = [
   { tag: "查规则", q: "会员卡能跨店用吗" },
@@ -262,6 +375,10 @@ const empty = document.getElementById("empty");
 const qEl = document.getElementById("q");
 const sendBtn = document.getElementById("send");
 const statusEl = document.getElementById("status");
+const wfModal = document.getElementById("wfModal");
+const wfList = document.getElementById("wfList");
+const wfMsg = document.getElementById("wfMsg");
+let wfKind = "ticket";
 
 let threadId = sessionStorage.getItem("sm_thread") ||
   ("u-" + Math.random().toString(36).slice(2, 10));
@@ -288,7 +405,9 @@ async function loadStatus() {
       <span class="pill ok">索引 ${d.stats.docs} 篇 / ${d.stats.chunks} 段</span>
       <span class="pill">嵌入 ${esc(d.embed_backend)}</span>
       <span class="pill ${llmOk ? "ok" : "warn"}">生成 ${llmOk ? esc(d.llm_backend) : "抽取式兜底"}</span>
+      <span class="pill btn" id="wfBtn">操作提案${d.workflow_pending ? " · " + d.workflow_pending : ""}</span>
       <span class="pill btn" id="newBtn">新会话</span>`;
+    document.getElementById("wfBtn").onclick = openWf;
     document.getElementById("newBtn").onclick = async () => {
       await fetch("/session/" + encodeURIComponent(threadId), { method: "DELETE" });
       threadId = "u-" + Math.random().toString(36).slice(2, 10);
@@ -301,6 +420,99 @@ async function loadStatus() {
     statusEl.innerHTML = `<span class="pill warn">服务未响应</span>`;
   }
 }
+
+/* ---------- 操作提案 ---------- */
+
+function openWf() {
+  wfModal.classList.add("open");
+  loadPending();
+}
+function closeWf() { wfModal.classList.remove("open"); }
+
+function setWfKind(kind) {
+  wfKind = kind;
+  document.querySelectorAll(".wf-tab").forEach(b => b.classList.toggle("on", b.dataset.kind === kind));
+  const ticket = kind === "ticket";
+  document.getElementById("wfCatWrap").hidden = !ticket;
+  document.getElementById("wfSummaryWrap").hidden = !ticket;
+  document.getElementById("wfItemWrap").hidden = ticket;
+  document.getElementById("wfQtyWrap").hidden = ticket;
+  document.getElementById("wfUnitWrap").hidden = ticket;
+}
+
+function wfSay(text, bad = false) {
+  wfMsg.textContent = text;
+  wfMsg.className = "wf-msg" + (bad ? " bad" : "");
+}
+
+async function loadPending() {
+  try {
+    const r = await fetch("/actions/pending");
+    const d = await r.json();
+    const acts = d.actions || [];
+    wfList.innerHTML = acts.length ? acts.map(a => `
+      <div class="wf-card">
+        <div class="t">${esc(a.summary)}<span class="badge">待确认</span></div>
+        <div class="m">${esc(a.action_id)} · 需要 ${esc(a.requires_role)} · 风险 ${esc(a.risk)}</div>
+        <div class="acts">
+          <button class="btn-primary" onclick="decideWf('${a.action_id}','confirm')">确认</button>
+          <button class="btn-ghost" onclick="decideWf('${a.action_id}','reject')">拒绝</button>
+        </div>
+      </div>`).join("") : `<div class="wf-msg">暂无待确认提案。先生成一条。</div>`;
+  } catch (e) {
+    wfList.innerHTML = `<div class="wf-msg bad">读取待办失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function proposeWf() {
+  const role = document.getElementById("wfRole").value;
+  const body = {
+    kind: wfKind,
+    store_name: document.getElementById("wfStore").value,
+    role,
+    actor: "web",
+  };
+  if (wfKind === "ticket") {
+    body.payload = {
+      category: document.getElementById("wfCategory").value,
+      summary: document.getElementById("wfSummary").value,
+    };
+  } else {
+    body.payload = {
+      item_name: document.getElementById("wfItem").value,
+      qty: Number(document.getElementById("wfQty").value),
+      unit: document.getElementById("wfUnit").value,
+    };
+  }
+  const r = await fetch("/actions/propose", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (!r.ok) { wfSay(d.detail || "提案失败", true); return; }
+  wfSay(`已生成 ${d.action_id} · 需要 ${d.requires_role} 确认 · 风险 ${d.risk}`);
+  loadPending();
+  loadStatus();
+}
+
+async function decideWf(id, action) {
+  const role = document.getElementById("wfRole").value;
+  const body = { role, actor: "web", reason: action === "reject" ? "网页拒绝" : "" };
+  const r = await fetch(`/actions/${id}/${action}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (!r.ok) { wfSay(d.detail || "操作失败", true); loadPending(); return; }
+  wfSay(action === "confirm" ? `已确认 ${id}` : `已拒绝 ${id}`);
+  loadPending();
+  loadStatus();
+}
+
+document.getElementById("wfClose").onclick = closeWf;
+wfModal.onclick = e => { if (e.target === wfModal) closeWf(); };
+document.querySelectorAll(".wf-tab").forEach(b => b.onclick = () => setWfKind(b.dataset.kind));
+document.getElementById("wfPropose").onclick = proposeWf;
 
 /* ---------- 渲染 ---------- */
 
@@ -535,6 +747,7 @@ qEl.addEventListener("input", () => {
 });
 
 loadStatus();
+if (location.hash === "#wf") openWf();
 qEl.focus();
 </script>
 </body>

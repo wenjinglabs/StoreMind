@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -19,6 +20,8 @@ from .config import settings
 from .rag.embedder import build_embedder
 from .rag.store import build_store
 from .tools.ops_tools import build_ops_tools
+from .workflow.db import WorkflowDB
+from .workflow.service import WorkflowError, WorkflowService
 
 app = FastAPI(
     title="StoreMind · 门店运营知识库 Agent",
@@ -43,6 +46,7 @@ _llm = build_llm(
     timeout=settings.llm_timeout,
 )
 _tools = build_ops_tools(settings)
+_workflow = WorkflowService(WorkflowDB(settings))
 _pipeline = Pipeline(_store, _embedder, _llm, _tools, settings)
 _agent = GraphAgent(_store, _embedder, _llm, _tools, settings)
 
@@ -67,6 +71,21 @@ class IngestIn(BaseModel):
     corpus_dir: str = Field(default="corpus")
 
 
+class ActionProposalIn(BaseModel):
+    kind: Literal["ticket", "restock"]
+    store_name: str = Field(..., min_length=1, max_length=50)
+    payload: dict = Field(default_factory=dict)
+    role: str = Field(default="clerk", pattern="^(clerk|manager)$")
+    actor: str = Field(default="web", max_length=50)
+    idempotency_key: str | None = Field(default=None, max_length=100)
+
+
+class DecisionIn(BaseModel):
+    role: str = Field(default="clerk", pattern="^(clerk|manager)$")
+    actor: str = Field(default="web", max_length=50)
+    reason: str = Field(default="", max_length=200)
+
+
 # ---------- routes ----------
 
 @app.get("/health")
@@ -79,6 +98,7 @@ def health() -> dict:
         "db_backend": settings.db_backend,
         "ops_backend": settings.ops_backend,
         "db": "postgres" if settings.db_backend == "postgres" else str(settings.db_path),
+        "workflow_pending": _workflow.pending_count(),
         "stats": _store.stats(),
     }
 
@@ -150,6 +170,49 @@ def chat(body: ChatIn) -> dict:
 @app.get("/session/{thread_id}/history")
 def session_history(thread_id: str) -> dict:
     return {"thread_id": thread_id, "turns": _agent.history(thread_id)}
+
+
+# ---------- 可执行工作流 ----------
+# 写操作不交给对话模型直接执行：先提案，人工确认后才落库，并写审计。
+
+def _wf_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except WorkflowError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+
+
+@app.post("/actions/propose")
+def propose_action(body: ActionProposalIn) -> dict:
+    return _wf_call(
+        _workflow.propose, body.kind, body.store_name, body.payload,
+        body.role, body.actor, body.idempotency_key,
+    )
+
+
+@app.get("/actions/pending")
+def pending_actions(store_name: str = "") -> dict:
+    return {"actions": _workflow.list_pending(store_name)}
+
+
+@app.get("/actions/{action_id}")
+def get_action(action_id: str) -> dict:
+    return _wf_call(_workflow.get, action_id)
+
+
+@app.get("/actions/{action_id}/audit")
+def action_audit(action_id: str) -> dict:
+    return {"action_id": action_id, "events": _wf_call(_workflow.audit, action_id)}
+
+
+@app.post("/actions/{action_id}/confirm")
+def confirm_action(action_id: str, body: DecisionIn) -> dict:
+    return _wf_call(_workflow.confirm, action_id, body.role, body.actor)
+
+
+@app.post("/actions/{action_id}/reject")
+def reject_action(action_id: str, body: DecisionIn) -> dict:
+    return _wf_call(_workflow.reject, action_id, body.role, body.actor, body.reason)
 
 
 @app.delete("/session/{thread_id}")

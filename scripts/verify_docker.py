@@ -87,7 +87,7 @@ def main() -> int:
     def t_mcp_health():
         h = c.get(f"{args.mcp}/health").json()
         assert h["ok"] is True, h
-        assert h["tools"] == 8 and h["docs"] == 8, h
+        assert h["tools"] == 13 and h["docs"] == 8, h
         return f"tools={h['tools']} docs={h['docs']}"
 
     def t_mcp_initialize():
@@ -118,6 +118,41 @@ def main() -> int:
         assert payload["data"] and payload["data"][0]["ok"] is True, payload.get("data")
         return f"intent={payload['intent']} 数据={payload['data'][0]['tool']} 轨迹={len(payload['trace'])}步"
 
+    def t_workflow_ticket():
+        p = c.post(f"{args.app}/actions/propose", json={
+            "kind": "ticket", "store_name": "广州天河店",
+            "payload": {"category": "酒水品质", "summary": "客人反映酒有异味"},
+            "role": "clerk", "actor": "docker",
+        }).json()
+        assert p["status"] == "pending", p
+        c1 = c.post(f"{args.app}/actions/{p['action_id']}/confirm",
+                    json={"role": "clerk", "actor": "docker"})
+        assert c1.status_code == 200, c1.text
+        done = c1.json()
+        assert done["status"] == "confirmed", done
+        assert done["result"]["ticket_id"].startswith("T-"), done["result"]
+        audit = c.get(f"{args.app}/actions/{p['action_id']}/audit").json()["events"]
+        assert [e["event"] for e in audit] == ["proposed", "confirmed"], audit
+        return f"ticket_id={done['result']['ticket_id']} 审计={len(audit)}条"
+
+    def t_workflow_permission():
+        p = c.post(f"{args.app}/actions/propose", json={
+            "kind": "restock", "store_name": "广州天河店",
+            "payload": {"item_name": "莫吉托", "qty": 20, "unit": "份"},
+            "role": "clerk", "actor": "docker",
+        }).json()
+        assert p["requires_role"] == "manager", p
+        denied = c.post(f"{args.app}/actions/{p['action_id']}/confirm",
+                        json={"role": "clerk", "actor": "docker"})
+        assert denied.status_code == 403, denied.text
+        ok = c.post(f"{args.app}/actions/{p['action_id']}/confirm",
+                    json={"role": "manager", "actor": "docker-manager"})
+        assert ok.status_code == 200, ok.text
+        done = ok.json()
+        assert done["status"] == "confirmed", done
+        assert done["result"]["request_id"].startswith("R-"), done["result"]
+        return f"店员403、店长确认 request_id={done['result']['request_id']}"
+
     check("app /health（零依赖配置）", t_health)
     check("app /chat 规则题", t_chat_policy)
     check("app /chat 数据题", t_chat_data)
@@ -126,6 +161,8 @@ def main() -> int:
     check("mcp initialize", t_mcp_initialize)
     check("mcp tools/call search_knowledge", t_mcp_search)
     check("mcp tools/call ask_storemind", t_mcp_ask)
+    check("工作流：客诉工单 提案→确认→审计", t_workflow_ticket)
+    check("工作流：补货越权→店长确认", t_workflow_permission)
 
     passed = sum(1 for _, ok, _ in checks if ok)
     lines = [

@@ -48,14 +48,15 @@ uvicorn app.main:app --port 8121
 ```bash
 python scripts/mcp_server.py --stdio        # MCP 标准传输，客户端拉起子进程
 python scripts/mcp_server.py --http 8765    # HTTP 传输，便于 curl / 容器
-python scripts/mcp_smoke_test.py            # 协议冒烟，12/12
+python scripts/mcp_smoke_test.py            # 协议冒烟，14/14
+python scripts/workflow_test.py             # 工作流：提案/确认/越权/幂等/审计，9/9
 ```
 
 **Docker（postgres + app + MCP 一起起）**：
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d --build
-python scripts/verify_docker.py             # 部署验证，8/8
+python scripts/verify_docker.py             # 部署验证，10/10
 ```
 
 默认 PG（pgvector）+ hashing + none；SQLite 仍是零依赖/CI 后端：
@@ -79,7 +80,7 @@ python scripts/eval.py                    # 金标集，出 recall@k 和各项�
 python scripts/smoke_test.py              # 端到端冒烟，5 条用例
 python scripts/compare_orchestration.py   # 手写编排 vs LangGraph 等价性
 python scripts/verify_e2e.py              # 打真模型的端到端验证，11 条用例
-python scripts/mcp_smoke_test.py          # MCP 协议冒烟，12 项；加 --zero-dep 跑零依赖模式
+python scripts/mcp_smoke_test.py          # MCP 协议冒烟，14 项；加 --zero-dep 跑零依赖模式
 ```
 
 **当前基线（改动后如果明显低于这些数，说明你搞坏了）**：
@@ -94,8 +95,9 @@ python scripts/mcp_smoke_test.py          # MCP 协议冒烟，12 项；加 --ze
 | 编排等价性 | 6/6 |
 | 冒烟 | 5/5 |
 | 端到端 | 11/11 无思考泄漏 |
-| MCP 协议冒烟 | 12/12（含零依赖模式） |
-| Docker 部署验证 | 8/8（hashing + none 与 ollama 各一次，PG 后端） |
+| MCP 协议冒烟 | 14/14（含零依赖模式） |
+| Docker 部署验证 | 10/10（hashing + none 与 ollama 各一次，PG 后端） |
+| 工作流测试 | 9/9（提案 / 确认 / 越权 / 幂等 / 拒绝 / 校验） |
 | SQLite ↔ PG 迁移对照 | 4/4（top1 24/24、召回集合 24/24、工具 5/5） |
 
 > PG 后端复跑金标集是 87.5%（SQLite 83.3%）。差异来自自检重查的模型判定波动，
@@ -151,6 +153,8 @@ langgraph 1.2.16 / langgraph-checkpoint-sqlite 3.1.2
 | `app/rag/*` | chunker / embedder / store（自实现 BM25）/ retriever | ~740 |
 | `app/rag/pg_store.py` | PostgreSQL + pgvector（HNSW），与 SQLite 接口一致 | ~340 |
 | `app/tools/pg_ops.py` | 经营数据工具的 PG 实现 | ~110 |
+| `app/workflow/db.py` | 提案 / 审计 / 工单 / 补货表（SQLite + PG） | ~140 |
+| `app/workflow/service.py` | 提案 → 确认/拒绝，权限、幂等、审计 | ~260 |
 | `app/tools/ops_tools.py` | 白名单结构化查询工具 | 136 |
 | `app/mcp/server.py` | 自实现 MCP server（JSON-RPC 2.0，stdio + HTTP） | ~500 |
 | `app/static/index.html` | 单文件前端，零构建 | ~530 |
@@ -327,6 +331,20 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 10 万 chunk 以上的 ANN 场景，不在单机小数据。面试别说成“性能提升”，
 说“双后端输出可验证一致，并为规模留了迁移路径”。
 
+### 6.15 写操作必须走提案 → 确认，别让模型直接执行
+
+模型会编参数（门店、品项、数量），补货/退款有权限，出了事还要能查是谁批的。
+所以 `app/workflow/` 里所有写操作都拆两步：`propose_*` 只写 pending 提案，
+`confirm` 才写 `tickets` / `restock_requests`，并写 `workflow_audit`。
+
+三个不能省的约束：
+- **幂等**：重复 confirm 返回第一次结果，不重复建单；提案用 `idempotency_key` 防重。
+- **角色**：补货需要 `manager`；越权返回 403 并记 `permission_denied`。
+- **审计**：`proposed` / `confirmed` / `rejected` / `permission_denied` 全部留痕。
+
+注意：`role` 现在是请求字段，**只用于演示**。生产必须从 SSO / 会话里取，
+不能信客户端传来的角色。这一条面试官很可能会问。
+
 ---
 
 ## 7. 接下来做什么
@@ -335,8 +353,9 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 
 | 优先 | 事项 | 为什么 | 预估 |
 |---|---|---|---|
-| **P0** | **MCP server（自己写协议实现）** | ✅ 2026-10-22 已完成：8 个工具 + 语料资源，stdio/HTTP，协议冒烟 12/12 | 半天 |
-| **P0** | **Docker 化 + 部署 + 录 3 分钟屏** | ✅ 2026-10-22 Docker 部分完成：PG + app + MCP，部署验证 8/8；**录屏还没做** | 1 天 |
+| **P0** | **MCP server（自己写协议实现）** | ✅ 2026-10-22 已完成：13 个工具 + 语料资源，stdio/HTTP，协议冒烟 14/14 | 半天 |
+| **P0** | **Docker 化 + 部署 + 录 3 分钟屏** | ✅ 2026-10-22 Docker 部分完成：PG + app + MCP，部署验证 10/10；**录屏还没做** | 1 天 |
+| **P1** | **可执行工作流（受控写操作）** | ✅ 2026-10-22 已完成：客诉工单/补货，提案→确认→审计，角色/幂等，测试 9/9 | 半天 |
 | **P1** | **PostgreSQL + pgvector 迁移** | ✅ 2026-10-22 已完成：HNSW、双后端 parity 4/4；PG 45 chunk 延迟 59.5ms vs SQLite 16.3ms（别宣传成性能提升） | 半天 |
 | **P0** | **改简历** | **10.27 死线**，代码再好简历上只有一行字也白搭 | 半天 |
 | P1 | 两篇博客（切片对照实验 / 评估集怎么建） | 加分项第 5 条，成本极低 | 1 天 |
@@ -385,6 +404,16 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 5. 防幻觉的四道防线 + Agent 层的自检重查（A/B 对照 +8.3 recall@1）
 6. 为什么自己实现 MCP 协议而不是调 SDK（握手 / 能力协商 / 通知无响应 / 错误码语义）
 7. 为什么最终上 PostgreSQL + pgvector，同时保留 SQLite（迁移对照 4/4，PG 小数据更慢）
+8. 为什么写操作要“提案 → 确认 → 审计”，而不是让 Agent 直接执行
+
+**工作流这条怎么讲**：
+
+> 问答 Agent 只能读，真正有用的是能做事。但写操作不能让模型直接点：
+> 模型会编参数，补货要店长权限，出了事要能追溯。所以我把写操作做成提案：
+> 模型/界面先 propose，人工 confirm 后才落库；补货确认要 manager，越权 403；
+> 重复确认幂等，不会重复建单；proposed/confirmed/rejected 全写审计。
+> 演示里可以直接在网页右上角“操作提案”点确认。
+> 角色目前是请求字段，生产会从 SSO 取——这是我知道的边界。
 
 **PG 这条怎么讲**：
 
@@ -436,6 +465,8 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 - ❌ 别把 `pgvector_init.sql` 重新挂到 `/docker-entrypoint-initdb.d`——会和 PgStore 抢 schema，见 6.13
 - ❌ 别把 `SM_EMBED_DIM` 写死成 1024——hashing 零依赖模式要 512，见 6.12
 - ❌ 别把容器数据挂回宿主机 `data/`——索引签名会互相覆盖，见 6.11
+- ❌ 别删工作流的确认/权限/审计/幂等——写操作直接执行是事故，见 6.15
+- ❌ 别让 MCP 的 `confirm_action` 跳过角色校验；`role` 只是演示字段，生产要从 SSO 取
 - ❌ 别擅自删文件、删字段、删测试数据
 
 ---

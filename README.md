@@ -70,7 +70,7 @@ uvicorn app.main:app --reload --port 8000
 docker compose -f deploy/docker-compose.yml up -d --build
 # 网页 http://127.0.0.1:8000/ · MCP http://127.0.0.1:8765/mcp
 
-python scripts/verify_docker.py      # 部署验证 8/8
+python scripts/verify_docker.py      # 部署验证 10/10
 ```
 
 默认是零依赖模式（`hashing + none`）：镜像自带 8 篇语料，启动时自动建经营库和索引，
@@ -95,8 +95,8 @@ SM_EMBED_BACKEND=ollama SM_LLM_BACKEND=ollama \
 
 | 配置 | /health | 规则题 | 数据题 | MCP |
 |---|---|---|---|---|
-| hashing + none（PG） | db=postgres docs=8 chunks=45 | 引用 5 段，抽取式 477 字 | `store_sales` revenue=51115.0 | 8/8 |
-| ollama + qwen2.5:7b（PG） | db=postgres docs=8 chunks=45 | 引用 5 段，生成 79 字，首次 0.98s | `store_sales` revenue=51115.0 | 8/8 |
+| hashing + none（PG） | db=postgres docs=8 chunks=45 | 引用 5 段，抽取式 477 字 | `store_sales` revenue=51115.0 | 10/10 |
+| ollama + qwen2.5:7b（PG） | db=postgres docs=8 chunks=45 | 引用 5 段，生成 42 字，首次 0.72s | `store_sales` revenue=51115.0 | 10/10 |
 
 两个实现细节：
 
@@ -118,8 +118,9 @@ python scripts/weight_sweep.py            # 向量权重对照实验
 python scripts/eval.py                    # 跑金标集，出 recall@k
 python scripts/compare_orchestration.py   # 手写编排 vs LangGraph 等价性 + 多轮演示
 python scripts/verify_e2e.py              # 真模型端到端验证（11 条用例）
-python scripts/mcp_smoke_test.py          # MCP 协议冒烟（stdio，12 项检查）
-python scripts/verify_docker.py           # Docker 部署验证（app + MCP，8 项检查）
+python scripts/mcp_smoke_test.py          # MCP 协议冒烟（stdio，14 项检查）
+python scripts/workflow_test.py           # 工作流：提案/确认/越权/幂等/审计（9/9）
+python scripts/verify_docker.py           # Docker 部署验证（app + MCP + 工作流，10 项）
 ```
 
 多轮会话（同一 `thread_id` 共享上下文）：
@@ -155,6 +156,8 @@ curl -s http://127.0.0.1:8765/health
 | `ask_storemind` | 完整 Agent：路由 + 检索/查库 + 自检重查，返回答案、引用、执行轨迹 |
 | `list_stores` | 列出全部门店 |
 | `store_sales` / `top_items` / `redemption_stats` / `inventory_alert` | 白名单经营数据查询，参数校验后执行预编译 SQL |
+| `propose_ticket` / `propose_restock` | 生成客诉工单 / 补货提案（只提案，不落库） |
+| `list_pending_actions` / `confirm_action` / `reject_action` | 查看待办、确认 / 拒绝，带角色校验与审计 |
 
 语料同时以 `storemind://corpus/{doc_id}` 资源暴露，客户端可以直接挂进上下文，不用先调工具。
 
@@ -171,16 +174,35 @@ curl -s http://127.0.0.1:8765/health
 }
 ```
 
-协议级验证（握手顺序、通知无响应、三类错误码、真实工具调用）：
+协议级验证（握手顺序、通知无响应、三类错误码、真实工具调用、工作流）：
 
 ```bash
-python scripts/mcp_smoke_test.py                 # 12/12
-python scripts/mcp_smoke_test.py --zero-dep      # 12/12，hashing + none 也能跑
+python scripts/mcp_smoke_test.py                 # 14/14
+python scripts/mcp_smoke_test.py --zero-dep      # 14/14，hashing + none 也能跑
 ```
 
 两个实现细节：stdio 的 stdout 只允许协议消息，日志全部走 stderr——混一行 print 客户端就解析失败；
 工具不存在返回 JSON-RPC `-32602`，工具跑通但查不到数据返回 `isError: true`，这两种失败语义不一样。
 `tools/call` 同时返回给人读的 `content` 和给客户端机器读的 `structuredContent`。
+
+## 可执行工作流（提案 → 确认 → 审计）
+
+写操作**不让模型直接执行**，统一走受控闭环：
+
+```
+propose_ticket / propose_restock
+  → pending 提案（不产生业务副作用）
+  → 前端确认卡片 / POST /actions/{id}/confirm
+  → 角色校验（补货需 manager）
+  → 写 tickets / restock_requests + audit_log
+```
+
+- **幂等**：同一条提案重复确认只返回第一次结果；`idempotency_key` 防止重复提案
+- **权限**：店员可确认客诉工单；补货必须店长确认，越权返回 403 并写审计
+- **审计**：`proposed` / `confirmed` / `rejected` / `permission_denied` 全部留痕
+- **演示**：打开 `http://127.0.0.1:8000/#wf`，或在页面右上角点「操作提案」
+- **测试**：`python scripts/workflow_test.py` → 9/9（提案、确认、越权、幂等、拒绝、校验）
+- Docker 部署验证包含 2 条工作流用例，总计 10/10
 
 ## 网页里能看到什么
 
@@ -198,6 +220,7 @@ python scripts/mcp_smoke_test.py --zero-dep      # 12/12，hashing + none 也能
 - `[D1]` 指向**经营数据行**（点开高亮工具调用表格的对应行）
 
 工具栏显示 `store_sales` 这类工具调用及其返回的真实聚合数据。
+右上角「操作提案」打开受控写操作面板：生成客诉工单/补货提案，确认后落库并写审计；补货需要店长角色。
 
 ## 换成生产配置
 
@@ -576,6 +599,9 @@ app/
   tools/
     ops_tools.py       白名单结构化查询工具（SQLite）
     pg_ops.py          同一组工具（PostgreSQL）
+  workflow/
+    db.py              操作提案 / 审计 / 工单表（SQLite + PG）
+    service.py         提案 → 确认/拒绝，权限、幂等、审计
   mcp/
     server.py          自实现 MCP server（JSON-RPC 2.0 + tools/resources + stdio/HTTP）
   static/
@@ -601,7 +627,8 @@ scripts/
   verify_e2e.py        真模型端到端验证（走 HTTP，11 条用例）
   mcp_server.py        MCP server 启动入口（不依赖 cwd）
   mcp_smoke_test.py    MCP 协议冒烟：握手 / 通知 / 工具 / 资源 / 三类错误码
-  verify_docker.py     Docker 部署验证：app 三个接口 + MCP 四个方法
+  verify_docker.py     Docker 部署验证：app 三个接口 + MCP 四个方法 + 工作流
+  workflow_test.py     工作流：提案/确认/越权/幂等/审计
   parity_backends.py   SQLite ↔ PostgreSQL 迁移对照：索引 / 召回 / 工具输出
   dump_prompt.py       导出真实 prompt 排查
   dump_chunks.py       导出语料切片结果，定位某句话落在哪一段
@@ -621,10 +648,12 @@ mcp.example.json       MCP 客户端配置示例
 - [x] 答案稳定性验证：同一问题连跑 5 次，关键内容 5/5
 - [x] **Agent 层：自检 → 改写 → 重查循环**。图里唯一的条件边和环，
       A/B 对照 recall@1 +8.3 个点、答案正确率零回退、延迟 +16ms
-- [x] **自写 MCP server**：自己实现 JSON-RPC 2.0 与 MCP 握手，暴露 8 个工具 + 8 篇语料资源，
-      stdio / HTTP 两种传输，协议冒烟 12/12（含零依赖模式）
-- [x] **Docker 化**：零依赖默认配置，`docker compose up` 同时起 app 和 MCP；
-      镜像 334MB，部署验证 8/8（hashing + none / ollama 各测一次）
+- [x] **自写 MCP server**：自己实现 JSON-RPC 2.0 与 MCP 握手，暴露 13 个工具 + 8 篇语料资源，
+      stdio / HTTP 两种传输，协议冒烟 14/14（含零依赖模式）
+- [x] **可执行工作流**：客诉工单 / 补货申请，提案 → 人工确认 → 落库 + 审计；
+      角色权限、幂等、拒绝全部覆盖，测试 9/9
+- [x] **Docker 化**：零依赖默认配置，`docker compose up` 同时起 PG + app + MCP；
+      镜像 334MB，部署验证 10/10（hashing + none / ollama 各测一次）
 - [x] **PostgreSQL + pgvector 迁移**：HNSW 索引，知识库与经营数据同库；
       SQLite 保留为零依赖后端，迁移对照 4/4（top1 24/24、召回集合 24/24、工具 5/5）
 - [ ] Redis 语义缓存：query embedding 相似度 > 0.95 直接返回

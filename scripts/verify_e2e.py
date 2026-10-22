@@ -6,13 +6,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from pathlib import Path
 
 import httpx
 
-BASE = "http://127.0.0.1:8098"
+BASE = os.environ.get("SM_E2E_BASE", "http://127.0.0.1:8098")
 
 CASES = [
     ("规则", "会员卡能跨店用吗", "跨店使用"),

@@ -31,6 +31,8 @@ from ..rag.embedder import build_embedder
 from ..rag.retriever import hybrid_search
 from ..rag.store import build_store
 from ..tools.ops_tools import ToolResult, build_ops_tools
+from ..workflow.db import WorkflowDB
+from ..workflow.service import WorkflowError, WorkflowService
 
 SERVER_NAME = "storemind"
 SERVER_VERSION = "0.1.0"
@@ -67,6 +69,20 @@ def _text_result(text: str, structured: dict | None = None, is_error: bool = Fal
     return result
 
 
+def _action_result(action: dict) -> dict:
+    lines = [
+        action["summary"],
+        f"状态={action['status']} · 需要角色={action['requires_role']} · 风险={action['risk']}",
+    ]
+    if action.get("result"):
+        lines.append("结果=" + json.dumps(action["result"], ensure_ascii=False))
+    if action.get("already"):
+        lines.append("（重复确认，未重复建单）")
+    if action.get("deduplicated"):
+        lines.append("（幂等键命中，返回已有提案）")
+    return _text_result("\n".join(lines), action)
+
+
 def _period(args: dict) -> str:
     period = str(args.get("period") or "last_7d")
     if period not in PERIODS:
@@ -101,6 +117,7 @@ class StoremindTools:
             self.s.embed_backend, ollama_base=self.s.ollama_base, model=self.s.embed_model
         )
         self.tools = build_ops_tools(self.s)
+        self.workflow = WorkflowService(WorkflowDB(self.s))
         self._agent: GraphAgent | None = None
 
     # Agent 延迟构建：只调 search_knowledge 的客户端不需要加载 LangGraph 和模型。
@@ -215,6 +232,68 @@ class StoremindTools:
         }
         return _text_result(st.answer, payload)
 
+    # ---------- 可执行工作流 ----------
+
+    def propose_ticket(self, args: dict) -> dict:
+        store = _store_name(args)
+        action = self.workflow.propose(
+            "ticket",
+            store,
+            {
+                "category": str(args.get("category") or "客诉"),
+                "summary": str(args.get("summary") or "").strip(),
+            },
+            role=str(args.get("role") or "clerk"),
+            actor=str(args.get("actor") or "mcp"),
+            idempotency_key=args.get("idempotency_key"),
+        )
+        return _action_result(action)
+
+    def propose_restock(self, args: dict) -> dict:
+        store = _store_name(args)
+        action = self.workflow.propose(
+            "restock",
+            store,
+            {
+                "item_name": str(args.get("item_name") or "").strip(),
+                "qty": args.get("qty"),
+                "unit": str(args.get("unit") or "份"),
+            },
+            role=str(args.get("role") or "clerk"),
+            actor=str(args.get("actor") or "mcp"),
+            idempotency_key=args.get("idempotency_key"),
+        )
+        return _action_result(action)
+
+    def list_pending_actions(self, args: dict) -> dict:
+        actions = self.workflow.list_pending(str(args.get("store_name") or ""))
+        text = "\n".join(
+            f"- {a['action_id']} · {a['summary']} · 需要 {a['requires_role']}"
+            for a in actions
+        ) or "没有待确认的提案。"
+        return _text_result(text, {"actions": actions})
+
+    def confirm_action(self, args: dict) -> dict:
+        action_id = str(args.get("action_id") or "").strip()
+        if not action_id:
+            raise ToolError("缺少 action_id")
+        action = self.workflow.confirm(
+            action_id, role=str(args.get("role") or "clerk"),
+            actor=str(args.get("actor") or "mcp"),
+        )
+        return _action_result(action)
+
+    def reject_action(self, args: dict) -> dict:
+        action_id = str(args.get("action_id") or "").strip()
+        if not action_id:
+            raise ToolError("缺少 action_id")
+        action = self.workflow.reject(
+            action_id, role=str(args.get("role") or "clerk"),
+            actor=str(args.get("actor") or "mcp"),
+            reason=str(args.get("reason") or ""),
+        )
+        return _action_result(action)
+
     @staticmethod
     def _ops(tool: str, result: ToolResult) -> dict:
         payload = {
@@ -300,6 +379,18 @@ STORE_SCHEMA = {
     "description": "门店名称，支持全称或简称，例如 广州天河店 / 天河店",
 }
 
+ROLE_SCHEMA = {
+    "type": "string",
+    "enum": ["clerk", "manager"],
+    "default": "clerk",
+    "description": "操作角色：clerk 店员 / manager 店长",
+}
+
+ACTION_ID_SCHEMA = {
+    "type": "string",
+    "description": "提案 ID，来自 propose_ticket / propose_restock 的返回",
+}
+
 TOOLS: list[dict] = [
     {
         "name": "search_knowledge",
@@ -375,6 +466,74 @@ TOOLS: list[dict] = [
             "required": ["store_name"],
         },
     },
+    {
+        "name": "propose_ticket",
+        "description": "生成客诉工单提案。只提案，不落库；需要后续 confirm_action 才真正建单。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "store_name": STORE_SCHEMA,
+                "summary": {"type": "string", "description": "客诉内容摘要"},
+                "category": {"type": "string", "default": "客诉", "description": "例如 酒水品质 / 服务态度 / 食品安全"},
+                "role": ROLE_SCHEMA,
+                "actor": {"type": "string", "default": "mcp"},
+                "idempotency_key": {"type": "string", "description": "可选；同 key 不会重复建提案"},
+            },
+            "required": ["store_name", "summary"],
+        },
+    },
+    {
+        "name": "propose_restock",
+        "description": "生成补货申请提案。只提案，不落库；需要 manager 角色 confirm_action。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "store_name": STORE_SCHEMA,
+                "item_name": {"type": "string", "description": "品项名，例如 莫吉托"},
+                "qty": {"type": "integer", "minimum": 1, "description": "补货数量"},
+                "unit": {"type": "string", "default": "份"},
+                "role": ROLE_SCHEMA,
+                "actor": {"type": "string", "default": "mcp"},
+                "idempotency_key": {"type": "string", "description": "可选；同 key 不会重复建提案"},
+            },
+            "required": ["store_name", "item_name", "qty"],
+        },
+    },
+    {
+        "name": "list_pending_actions",
+        "description": "列出待确认的操作提案，可按门店过滤。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"store_name": STORE_SCHEMA},
+        },
+    },
+    {
+        "name": "confirm_action",
+        "description": "确认一条提案并执行。需要对应角色；重复确认是幂等的，不会重复建单。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action_id": ACTION_ID_SCHEMA,
+                "role": ROLE_SCHEMA,
+                "actor": {"type": "string", "default": "mcp"},
+            },
+            "required": ["action_id"],
+        },
+    },
+    {
+        "name": "reject_action",
+        "description": "拒绝一条提案，不产生业务副作用，写审计。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action_id": ACTION_ID_SCHEMA,
+                "role": ROLE_SCHEMA,
+                "actor": {"type": "string", "default": "mcp"},
+                "reason": {"type": "string", "description": "拒绝原因"},
+            },
+            "required": ["action_id"],
+        },
+    },
 ]
 
 TOOL_METHODS: dict[str, Callable[[dict], dict]] = {
@@ -386,6 +545,11 @@ TOOL_METHODS: dict[str, Callable[[dict], dict]] = {
     "top_items": StoremindTools.top_items,
     "redemption_stats": StoremindTools.redemption_stats,
     "inventory_alert": StoremindTools.inventory_alert,
+    "propose_ticket": StoremindTools.propose_ticket,
+    "propose_restock": StoremindTools.propose_restock,
+    "list_pending_actions": StoremindTools.list_pending_actions,
+    "confirm_action": StoremindTools.confirm_action,
+    "reject_action": StoremindTools.reject_action,
 }
 
 
@@ -446,6 +610,8 @@ class McpServer:
                     "StoreMind 是连锁酒吧/餐饮门店的运营知识库。"
                     "规则类问题用 search_knowledge 或 ask_storemind；"
                     "经营数据用 store_sales / top_items / redemption_stats / inventory_alert。"
+                    "写操作（建工单、补货）必须先 propose_* 生成提案，再用 confirm_action 确认；"
+                    "confirm 需要对应角色，重复确认是幂等的。"
                 ),
             }
 
@@ -472,6 +638,8 @@ class McpServer:
                 return handler(self.tools, args)
             except ToolError as e:
                 return _text_result(f"参数错误: {e}", is_error=True)
+            except WorkflowError as e:
+                return _text_result(f"工作流: {e}", is_error=True)
             except FileNotFoundError as e:
                 return _text_result(f"数据未就绪: {e}", is_error=True)
             except RpcError:

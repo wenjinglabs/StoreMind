@@ -25,6 +25,8 @@ ROOT = Path(__file__).resolve().parent.parent
 EXPECTED_TOOLS = {
     "search_knowledge", "list_knowledge_docs", "ask_storemind",
     "list_stores", "store_sales", "top_items", "redemption_stats", "inventory_alert",
+    "propose_ticket", "propose_restock", "list_pending_actions",
+    "confirm_action", "reject_action",
 }
 
 
@@ -221,6 +223,47 @@ def main() -> int:
             assert payload.get("trace"), "执行轨迹为空"
             return f"intent={payload['intent']} 引用={len(payload['citations'])} 轨迹={len(payload['trace'])} 步"
         check("tools/call ask_storemind", t_ask)
+
+        def t_workflow():
+            # 客诉工单：提案 → 店员确认
+            p, text, err = _tool_payload(s.call_tool("propose_ticket", {
+                "store_name": "广州天河店", "summary": "客人反映酒有异味",
+                "category": "酒水品质", "role": "clerk", "actor": "smoke",
+            }), s._id)
+            assert not err, text
+            assert p["status"] == "pending" and p["requires_role"] == "clerk", p
+            ticket_id = p["action_id"]
+            c, text, err = _tool_payload(s.call_tool("confirm_action", {
+                "action_id": ticket_id, "role": "clerk", "actor": "smoke",
+            }), s._id)
+            assert not err and c["status"] == "confirmed", text
+            assert c["result"]["ticket_id"].startswith("T-"), c["result"]
+
+            # 补货：店员确认被拒，店长确认成功
+            r, text, err = _tool_payload(s.call_tool("propose_restock", {
+                "store_name": "广州天河店", "item_name": "莫吉托", "qty": 20,
+                "role": "clerk", "actor": "smoke",
+            }), s._id)
+            assert not err, text
+            assert r["requires_role"] == "manager", r
+            restock_id = r["action_id"]
+            _, text, denied = _tool_payload(s.call_tool("confirm_action", {
+                "action_id": restock_id, "role": "clerk",
+            }), s._id)
+            assert denied and "manager" in text, text
+            m, text, err = _tool_payload(s.call_tool("confirm_action", {
+                "action_id": restock_id, "role": "manager", "actor": "smoke-manager",
+            }), s._id)
+            assert not err and m["status"] == "confirmed", text
+            return f"ticket={c['result']['ticket_id']} restock={m['result']['request_id']} 越权已拦截"
+        check("tools/call 工作流：提案→确认→权限", t_workflow)
+
+        def t_pending():
+            p, text, err = _tool_payload(s.call_tool("list_pending_actions", {}), s._id)
+            assert not err, text
+            assert isinstance(p.get("actions"), list), p
+            return f"{len(p['actions'])} 条待办"
+        check("tools/call list_pending_actions", t_pending)
 
         def t_unknown_method():
             resp = s.call("does/not/exist")
