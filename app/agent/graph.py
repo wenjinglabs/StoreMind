@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Annotated, TypedDict
 
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph
 
@@ -89,7 +90,14 @@ class GraphAgent:
         path.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False：FastAPI 的线程池会跨线程复用连接
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
-        self.checkpointer = SqliteSaver(self._conn)
+        # state 里存的是 Hit / ToolResult 这类业务 dataclass。
+        # langgraph 的新版序列化默认只信任内置类型，从旧 checkpoint 读回来会警告
+        # （未来版本直接拒绝）。这里显式登记，避免服务重启后会话读不回来。
+        serde = JsonPlusSerializer(allowed_msgpack_modules=[
+            ("app.rag.store", "Hit"),
+            ("app.tools.ops_tools", "ToolResult"),
+        ])
+        self.checkpointer = SqliteSaver(self._conn, serde=serde)
         self.graph = self._build()
 
     # ---------- 状态搬运 ----------

@@ -1,0 +1,19 @@
+MCP smoke test · 2026-10-22T11:44:31
+零依赖模式: 否 (读 .env)
+协议: 2025-06-18 · 传输: stdio
+
+[PASS] initialize 握手 · protocol=2025-06-18 server=storemind
+[PASS] 通知无响应 + ping · pong
+[PASS] tools/list · 8 个工具
+[PASS] tools/call search_knowledge · 3 段，top1=客诉处理手册 > 酒水异味或品质问题
+[PASS] resources/list · 8 个文档资源
+[PASS] resources/read · storemind://corpus/product/01-酒水知识与出品标准.md · 919 字符
+[PASS] tools/call list_stores · 4 家门店
+[PASS] tools/call store_sales · 营业额=51115.0 订单=241
+[PASS] tools/call ask_storemind · intent=policy 引用=5 轨迹=6 步
+[PASS] 未知方法返回 -32601 · code=-32601
+[PASS] 未知工具返回 -32602 · code=-32602
+[PASS] 非法 JSON 返回 -32700 · code=-32700
+
+结果 12/12
+服务端退出码: 0

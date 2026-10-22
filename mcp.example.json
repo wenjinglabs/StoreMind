@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "storemind": {
+      "command": "<项目绝对路径>/.venv/Scripts/python.exe",
+      "args": [
+        "<项目绝对路径>/scripts/mcp_server.py",
+        "--stdio"
+      ],
+      "env": {
+        "SM_EMBED_BACKEND": "ollama",
+        "SM_EMBED_MODEL": "bge-m3",
+        "SM_LLM_BACKEND": "ollama",
+        "SM_LLM_MODEL": "qwen2.5:7b",
+        "SM_OLLAMA_BASE": "http://127.0.0.1:11434"
+      }
+    }
+  }
+}

@@ -75,6 +75,7 @@ python scripts/weight_sweep.py            # 向量权重对照实验
 python scripts/eval.py                    # 跑金标集，出 recall@k
 python scripts/compare_orchestration.py   # 手写编排 vs LangGraph 等价性 + 多轮演示
 python scripts/verify_e2e.py              # 真模型端到端验证（11 条用例）
+python scripts/mcp_smoke_test.py          # MCP 协议冒烟（stdio，12 项检查）
 ```
 
 多轮会话（同一 `thread_id` 共享上下文）：
@@ -87,6 +88,55 @@ curl -X POST http://127.0.0.1:8000/chat \
   -H "Content-Type: application/json" \
   -d "{\"query\":\"那退卡呢\",\"thread_id\":\"u1\"}"
 ```
+
+## MCP server（自己实现协议，不用 SDK）
+
+把知识库和经营数据暴露成标准 MCP 工具，任何 MCP 客户端（Claude Desktop / Cursor / Claude Code）都能接。
+**协议是自己写的**：JSON-RPC 2.0 帧、`initialize` 握手、能力协商、`tools/list` / `tools/call`、
+`resources/list` / `resources/read`，只用标准库，没有装 `mcp` SDK。
+
+```bash
+# stdio：MCP 的标准传输，客户端拉起子进程用这个
+python scripts/mcp_server.py --stdio
+
+# HTTP：方便 curl 和容器部署
+python scripts/mcp_server.py --http 8765
+curl -s http://127.0.0.1:8765/health
+```
+
+| 工具 | 用途 |
+|---|---|
+| `search_knowledge` | 混合检索知识库，返回章节路径、分值和原文片段 |
+| `list_knowledge_docs` | 列出文档与切片数 |
+| `ask_storemind` | 完整 Agent：路由 + 检索/查库 + 自检重查，返回答案、引用、执行轨迹 |
+| `list_stores` | 列出全部门店 |
+| `store_sales` / `top_items` / `redemption_stats` / `inventory_alert` | 白名单经营数据查询，参数校验后执行预编译 SQL |
+
+语料同时以 `storemind://corpus/{doc_id}` 资源暴露，客户端可以直接挂进上下文，不用先调工具。
+
+客户端配置见 `mcp.example.json`（把 `<项目绝对路径>` 换成实际路径）：
+
+```json
+{
+  "mcpServers": {
+    "storemind": {
+      "command": "<项目绝对路径>/.venv/Scripts/python.exe",
+      "args": ["<项目绝对路径>/scripts/mcp_server.py", "--stdio"]
+    }
+  }
+}
+```
+
+协议级验证（握手顺序、通知无响应、三类错误码、真实工具调用）：
+
+```bash
+python scripts/mcp_smoke_test.py                 # 12/12
+python scripts/mcp_smoke_test.py --zero-dep      # 12/12，hashing + none 也能跑
+```
+
+两个实现细节：stdio 的 stdout 只允许协议消息，日志全部走 stderr——混一行 print 客户端就解析失败；
+工具不存在返回 JSON-RPC `-32602`，工具跑通但查不到数据返回 `isError: true`，这两种失败语义不一样。
+`tools/call` 同时返回给人读的 `content` 和给客户端机器读的 `structuredContent`。
 
 ## 网页里能看到什么
 
@@ -462,6 +512,8 @@ app/
     retriever.py       混合召回 + 加权 RRF + 路径加权重排
   tools/
     ops_tools.py       白名单结构化查询工具
+  mcp/
+    server.py          自实现 MCP server（JSON-RPC 2.0 + tools/resources + stdio/HTTP）
   static/
     index.html         单文件前端页面，零构建，fetch 直接打 /chat
 corpus/                门店运营语料（sop / rules / product）
@@ -483,11 +535,14 @@ scripts/
   probe_agent.py       Agent 层实测：自检重查是否真的修正了 top1
   probe_agent_ab.py    Agent 层 A/B 对照：开关自检重查的收益量化
   verify_e2e.py        真模型端到端验证（走 HTTP，11 条用例）
+  mcp_server.py        MCP server 启动入口（不依赖 cwd）
+  mcp_smoke_test.py    MCP 协议冒烟：握手 / 通知 / 工具 / 资源 / 三类错误码
   dump_prompt.py       导出真实 prompt 排查
   dump_chunks.py       导出语料切片结果，定位某句话落在哪一段
   dump_judge.py        导出 judge 模型的原始输出，查解析失败
   setup_local.bat      一键起 ollama + 拉模型 + 建索引
 deploy/                docker-compose 与 pgvector schema
+mcp.example.json       MCP 客户端配置示例
 ```
 
 ## 路线图
@@ -500,7 +555,8 @@ deploy/                docker-compose 与 pgvector schema
 - [x] 答案稳定性验证：同一问题连跑 5 次，关键内容 5/5
 - [x] **Agent 层：自检 → 改写 → 重查循环**。图里唯一的条件边和环，
       A/B 对照 recall@1 +8.3 个点、答案正确率零回退、延迟 +16ms
-- [ ] 自写 MCP server，把知识库检索暴露成标准工具（当前工具是进程内调用）
+- [x] **自写 MCP server**：自己实现 JSON-RPC 2.0 与 MCP 握手，暴露 8 个工具 + 8 篇语料资源，
+      stdio / HTTP 两种传输，协议冒烟 12/12（含零依赖模式）
 - [ ] Redis 语义缓存：query embedding 相似度 > 0.95 直接返回
 - [ ] 加 rerank 模型（bge-reranker），解决 top1 排序不理想这个最大短板
 - [ ] LLM 版指代消解：当前「那退卡呢」靠规则借上文，复杂追问会失效

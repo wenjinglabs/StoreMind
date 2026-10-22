@@ -43,6 +43,14 @@ python scripts/build_index.py
 uvicorn app.main:app --port 8121
 ```
 
+**MCP server（另一条对外入口，不依赖 FastAPI）**：
+
+```bash
+python scripts/mcp_server.py --stdio        # MCP 标准传输，客户端拉起子进程
+python scripts/mcp_server.py --http 8765    # HTTP 传输，便于 curl / 容器
+python scripts/mcp_smoke_test.py            # 协议冒烟，12/12
+```
+
 **打开 `http://127.0.0.1:8121/` 是可以直接对话的网页**，
 `/docs` 是 FastAPI 自动生成的接口文档。
 
@@ -53,6 +61,7 @@ python scripts/eval.py                    # 金标集，出 recall@k 和各项�
 python scripts/smoke_test.py              # 端到端冒烟，5 条用例
 python scripts/compare_orchestration.py   # 手写编排 vs LangGraph 等价性
 python scripts/verify_e2e.py              # 打真模型的端到端验证，11 条用例
+python scripts/mcp_smoke_test.py          # MCP 协议冒烟，12 项；加 --zero-dep 跑零依赖模式
 ```
 
 **当前基线（改动后如果明显低于这些数，说明你搞坏了）**：
@@ -67,6 +76,7 @@ python scripts/verify_e2e.py              # 打真模型的端到端验证，11 
 | 编排等价性 | 6/6 |
 | 冒烟 | 5/5 |
 | 端到端 | 11/11 无思考泄漏 |
+| MCP 协议冒烟 | 12/12（含零依赖模式） |
 
 ---
 
@@ -115,6 +125,7 @@ langgraph 1.2.16 / langgraph-checkpoint-sqlite 3.1.2
 | `app/agent/llm.py` | 生成层（none / ollama / openai 兼容） | 130 |
 | `app/rag/*` | chunker / embedder / store（自实现 BM25）/ retriever | ~740 |
 | `app/tools/ops_tools.py` | 白名单结构化查询工具 | 136 |
+| `app/mcp/server.py` | 自实现 MCP server（JSON-RPC 2.0，stdio + HTTP） | ~500 |
 | `app/static/index.html` | 单文件前端，零构建 | ~530 |
 
 **关键设计：`pipeline.py` 和 `graph.py` 是同一套逻辑的两种编排，共用节点方法。**
@@ -228,6 +239,30 @@ judge 提示词里原本写「OK 时第二行输出 `-`」，结果模型在 MIS
 报 `CreateProcessW ERROR_ACCESS_DENIED` 时**再试一次通常就通**，
 不用立刻怀疑环境坏了。
 
+### 6.9 MCP 的 stdio 通道只能出现协议消息
+
+`python scripts/mcp_server.py --stdio` 的 stdout 是 JSON-RPC 帧，
+每隔一行一条。调试时随手 `print()` 到 stdout 会让客户端直接解析失败，
+而且报错看起来像「协议实现错了」，很难往「多了一行日志」上想。
+**日志一律写 stderr**，`scripts/mcp_smoke_test.py` 的报告会附上服务端 stderr，
+正常不应该出现 Traceback。
+
+另一个容易写错的点：JSON-RPC 通知（没有 `id`）**不能有响应**。
+冒烟测试用「发 `notifications/initialized` 后紧接着发 ping，检查收到的 id 是 ping 的」
+来验证这条。
+
+### 6.10 LangGraph 读回旧 checkpoint 会警告业务类型未注册
+
+state 里存了 `Hit` / `ToolResult` 两个 dataclass。langgraph 新版序列化默认只信任内置类型，
+从旧 checkpoint 读回来会报：
+
+```
+Deserializing unregistered type app.rag.store.Hit from checkpoint.
+```
+
+现在 `graph.py` 里显式传了 `JsonPlusSerializer(allowed_msgpack_modules=[...])`。
+**别删这两行**——新版 langgraph 会从警告变成直接拒绝，表现是「会话历史读不出来」。
+
 ---
 
 ## 7. 接下来做什么
@@ -236,7 +271,7 @@ judge 提示词里原本写「OK 时第二行输出 `-`」，结果模型在 MIS
 
 | 优先 | 事项 | 为什么 | 预估 |
 |---|---|---|---|
-| **P0** | **MCP server（自己写协议实现）** | JD 硬指标；应届生里几乎没人自己写过协议，只调包的不算 | 半天 |
+| **P0** | **MCP server（自己写协议实现）** | ✅ 2026-10-22 已完成：8 个工具 + 语料资源，stdio/HTTP，协议冒烟 12/12 | 半天 |
 | **P0** | **Docker 化 + 部署 + 录 3 分钟屏** | 兑现「5 分钟能在你机器上跑起来」；这家公司 13 人，面试官大概率是技术负责人，他最看重这个 | 1 天 |
 | **P0** | **改简历** | **10.27 死线**，代码再好简历上只有一行字也白搭 | 半天 |
 | P1 | 两篇博客（切片对照实验 / 评估集怎么建） | 加分项第 5 条，成本极低 | 1 天 |
@@ -260,7 +295,6 @@ judge 提示词里原本写「OK 时第二行输出 `-`」，结果模型在 MIS
 
 ### 7.3 还没做的功能（README 路线图里）
 
-- 自写 MCP server（当前工具是进程内调用）
 - Redis 语义缓存
 - rerank 模型
 - LLM 版指代消解（现在「那退卡呢」靠规则借上文，复杂追问会失效）
@@ -277,13 +311,22 @@ judge 提示词里原本写「OK 时第二行输出 `-`」，结果模型在 MIS
 > 它不是单纯文档问答，因为门店场景里规则和事实是分开的：规则在文档里，事实在订单库里。
 > 所以我做了意图路由，先判断该查文档还是该查数据库。
 
-**五个能撑 3 分钟的技术决策**（README 第 6 节有完整版）：
+**六个能撑 3 分钟的技术决策**（README 第 6 节有完整版）：
 
 1. 为什么用 pgvector 而不是独立向量库
 2. 为什么不让 LLM 自由生成 SQL（注入 / 幻觉 / 权限三个角度）
 3. 混合检索里两路的价值取决于嵌入模型质量（有权重对照实验）
 4. 为什么先手写状态机再迁 LangGraph（同一套逻辑两种编排，6/6 等价）
 5. 防幻觉的四道防线 + Agent 层的自检重查（A/B 对照 +8.3 recall@1）
+6. 为什么自己实现 MCP 协议而不是调 SDK（握手 / 能力协商 / 通知无响应 / 错误码语义）
+
+**MCP 这条怎么讲**（JD 硬指标，别只说「我接入了 MCP」）：
+
+> MCP 的传输层就是 JSON-RPC 2.0，核心是 `initialize` 协商版本和能力、`tools/list` 报清单、
+> `tools/call` 执行、`resources/read` 读资源。我没用 SDK，用标准库实现了这四件事，
+> 并写了协议级冒烟：通知消息不能有响应、未知方法返回 -32601、参数错误返回 -32602、
+> 工具跑了但没数据返回 `isError` 而不是 JSON-RPC 错误。
+> 工具分两层：原子工具给客户端自由组合，`ask_storemind` 把项目里的路由和自检重查也带过去。
 
 **最有分量的一条**（如果面试官问「跟普通 RAG demo 有什么区别」）：
 
@@ -311,6 +354,8 @@ judge 提示词里原本写「OK 时第二行输出 `-`」，结果模型在 MIS
   （只有 `data/_*` 开头的临时文件该忽略）
 - ❌ 别为了「简洁」把 Agent 层的自检重查去掉——它有 A/B 数据支撑
 - ❌ 别在没跑完四个验证命令前说「改好了」
+- ❌ 别删 `scripts/mcp_smoke_test.py` 和 `data/mcp_report*.txt`——MCP 是自己写的协议，
+      这两份报告是「协议实现正确」的唯一证据
 - ❌ 别擅自删文件、删字段、删测试数据
 
 ---
