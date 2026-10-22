@@ -81,59 +81,53 @@ class PgStore:
                    )"""
             )
 
-            # 维度不一致就重建 chunks。HNSW 要求固定维度，不能 ALTER。
-            try:
-                cur.execute(
-                    """SELECT format_type(atttypid, atttypmod) AS t
-                       FROM pg_attribute
-                       WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'"""
-                )
-                row = cur.fetchone()
-            except psycopg.errors.UndefinedTable:
-                row = None
-            expected = f"vector({self.dim})"
-            if row and row["t"] != expected:
-                cur.execute("DROP TABLE IF EXISTS chunk_terms")
-                cur.execute("DROP TABLE IF EXISTS chunks")
+            # 维度不一致时不要在这里删表：零依赖/不同嵌入器可能只是临时只读访问。
+            # 向量路会按 dim 过滤，BM25 仍可用；重建由 build_index --rebuild 调 reset()。
+            self._create_chunk_tables(cur)
 
-            cur.execute(
-                f"""CREATE TABLE IF NOT EXISTS chunks (
-                        id           BIGSERIAL PRIMARY KEY,
-                        doc_id       TEXT NOT NULL,
-                        doc_title    TEXT NOT NULL,
-                        section_path TEXT NOT NULL,
-                        chunk_index  INTEGER NOT NULL,
-                        text         TEXT NOT NULL,
-                        embed_text   TEXT NOT NULL,
-                        char_start   INTEGER NOT NULL,
-                        char_end     INTEGER NOT NULL,
-                        content_hash TEXT NOT NULL,
-                        dim          INTEGER NOT NULL,
-                        embedding    vector({self.dim}) NOT NULL
-                    )"""
-            )
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id)")
-            cur.execute(
-                """CREATE INDEX IF NOT EXISTS idx_chunks_embedding
-                   ON chunks USING hnsw (embedding vector_cosine_ops)
-                   WITH (m = 16, ef_construction = 64)"""
-            )
-            cur.execute(
-                """CREATE TABLE IF NOT EXISTS chunk_terms (
-                       chunk_id BIGINT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
-                       term     TEXT NOT NULL,
-                       tf       INTEGER NOT NULL,
-                       PRIMARY KEY (chunk_id, term)
-                   )"""
-            )
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_terms_term ON chunk_terms(term)")
+    def _create_chunk_tables(self, cur) -> None:
+        cur.execute(
+            f"""CREATE TABLE IF NOT EXISTS chunks (
+                    id           BIGSERIAL PRIMARY KEY,
+                    doc_id       TEXT NOT NULL,
+                    doc_title    TEXT NOT NULL,
+                    section_path TEXT NOT NULL,
+                    chunk_index  INTEGER NOT NULL,
+                    text         TEXT NOT NULL,
+                    embed_text   TEXT NOT NULL,
+                    char_start   INTEGER NOT NULL,
+                    char_end     INTEGER NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    dim          INTEGER NOT NULL,
+                    embedding    vector({self.dim}) NOT NULL
+                )"""
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id)")
+        cur.execute(
+            """CREATE INDEX IF NOT EXISTS idx_chunks_embedding
+               ON chunks USING hnsw (embedding vector_cosine_ops)
+               WITH (m = 16, ef_construction = 64)"""
+        )
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS chunk_terms (
+                   chunk_id BIGINT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+                   term     TEXT NOT NULL,
+                   tf       INTEGER NOT NULL,
+                   PRIMARY KEY (chunk_id, term)
+               )"""
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_terms_term ON chunk_terms(term)")
 
     # ---------- 维护 ----------
 
     def reset(self) -> None:
-        with self._conn().transaction():
-            with self._conn().cursor() as cur:
-                cur.execute("TRUNCATE chunk_terms, chunks, docs, meta RESTART IDENTITY")
+        """清空并重建 chunks 表，按当前嵌入维度。"""
+        with self._conn().cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS chunk_terms")
+            cur.execute("DROP TABLE IF EXISTS chunks")
+            cur.execute("DELETE FROM docs")
+            cur.execute("DELETE FROM meta")
+            self._create_chunk_tables(cur)
 
     def get_meta(self, key: str) -> str | None:
         with self._conn().cursor() as cur:

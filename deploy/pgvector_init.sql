@@ -43,7 +43,8 @@ CREATE INDEX IF NOT EXISTS idx_chunks_embedding
     ON chunks USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
 
--- 应用层 BM25 的词表，和 SQLite 版同构。
+-- 应用层 BM25 的词表。
+-- 注意：运行时已没有 SQLite；这张表由 PgStore 创建，BM25 打分仍在 Python。
 CREATE TABLE IF NOT EXISTS chunk_terms (
     chunk_id BIGINT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
     term     TEXT NOT NULL,

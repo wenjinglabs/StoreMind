@@ -38,14 +38,10 @@ class Settings:
     data_dir: Path = field(default_factory=lambda: ROOT / "data")
     corpus_dir: Path = field(default_factory=lambda: ROOT / "corpus")
 
-    # 存储后端: sqlite | postgres
-    # sqlite 是零依赖/CI 路径（clone 下来不装数据库也能跑）；
-    # postgres 是部署路径（pgvector + HNSW），Docker compose 默认用它。
-    db_backend: str = field(default_factory=lambda: _env("SM_DB_BACKEND", "sqlite"))
+    # 存储：PostgreSQL + pgvector。运行时不再有 SQLite fallback。
     pg_dsn: str = field(default_factory=lambda: _env(
         "SM_PG_DSN", "postgresql://storemind:storemind@127.0.0.1:5433/storemind"
     ))
-    ops_backend: str = field(default_factory=lambda: _env("SM_OPS_BACKEND", "sqlite"))
 
     # 嵌入后端: hashing | ollama
     # hashing 零依赖，用于无网络/未拉模型时跑通链路；ollama 是正式路径
@@ -85,10 +81,6 @@ class Settings:
     agent_max_attempts: int = field(
         default_factory=lambda: int(_env("SM_AGENT_MAX_ATTEMPTS", "2"))
     )
-
-    @property
-    def db_path(self) -> Path:
-        return self.data_dir / "storemind.sqlite3"
 
     @property
     def embed_dim(self) -> int:

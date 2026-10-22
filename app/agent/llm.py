@@ -52,7 +52,7 @@ class OllamaLLM(LLM):
             # keep_alive 给足：默认 5 分钟后模型被卸载，
             # 下次请求要重新加载 2.5GB 权重，延迟从 0.4 秒跳到 17 秒。
             "keep_alive": "30m",
-            "options": {"temperature": temperature, "num_predict": 400},
+            "options": {"temperature": temperature, "num_predict": 400, "seed": 42},
         }
         # qwen3 是混合推理模型，think=true 时推理进 message.thinking、
         # content 只剩最终答案；think=false 时推理会直接混进 content，

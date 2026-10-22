@@ -1,4 +1,4 @@
-MCP smoke test · 2026-10-22T20:17:54
+MCP smoke test · 2026-10-22T21:14:36
 零依赖模式: 否 (读 .env)
 协议: 2025-06-18 · 传输: stdio
 
@@ -11,7 +11,7 @@ MCP smoke test · 2026-10-22T20:17:54
 [PASS] tools/call list_stores · 4 家门店
 [PASS] tools/call store_sales · 营业额=51115.0 订单=241
 [PASS] tools/call ask_storemind · intent=policy 引用=5 轨迹=6 步
-[PASS] tools/call 工作流：提案→确认→权限 · ticket=T-20261022-B151F1 restock=R-20261022-CD0999 越权已拦截
+[PASS] tools/call 工作流：提案→确认→权限 · ticket=T-20261022-A47A92 restock=R-20261022-64F242 越权已拦截
 [PASS] tools/call list_pending_actions · 0 条待办
 [PASS] 未知方法返回 -32601 · code=-32601
 [PASS] 未知工具返回 -32602 · code=-32602

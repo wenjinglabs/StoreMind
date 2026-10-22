@@ -30,14 +30,14 @@ StoreMind · 门店运营知识库 Agent
 - 代码 4792 行 Python（app + scripts）
 
 基线指标（改完后如果明显低于这些数，说明你搞坏了）：
-  规则题 recall@1 83.3% / @3 95.8% / 答案关键内容命中 100%
+  规则题 recall@1 87.5% / @3 95.8% / 答案关键内容命中 100%
   数据题工具选对 100% / 无答案题正确拒答 100% / 路由准确率 100%
   编排等价性 6/6 / 冒烟 5/5 / 端到端 11/11 无思考泄漏
 
 ## 硬约束（违反就是做错，不是风格问题）
-1. 零依赖模式必须保留：.env 改 SM_EMBED_BACKEND=hashing + SM_LLM_BACKEND=none
-   就能在没有 GPU、没有模型的情况下跑通全链路。这是 CI 配置，也是「面试官 clone 下来
-   就能跑」的保证。已被 git clone 验证过能独立建库建索引。别删这条路径。
+1. 无模型模式必须保留：.env 改 SM_EMBED_BACKEND=hashing + SM_LLM_BACKEND=none
+   就能在没有 GPU、没有模型的情况下跑通全链路（仍需要 compose 里的 PostgreSQL）。
+   这是 CI 配置；clone 后先起 postgres，别删这条路径。
 2. .env 里有 key，绝不能提交（.gitignore 已覆盖）。
 3. data/ 下的评估报告（agent_ab.txt / model_compare.txt / verify_e2e.txt 等）是
    面试证据，必须提交；只有 data/_* 开头的临时文件才忽略。别一刀切。
@@ -90,7 +90,7 @@ StoreMind · 门店运营知识库 Agent
 
 ## 项目背景
 StoreMind · 门店运营知识库 Agent，投递某公司 AI 应用开发岗（应届，Python）。
-FastAPI + LangGraph + SQLite + 本地 ollama（bge-m3 嵌入 / qwen2.5:7b 生成）。
+FastAPI + LangGraph + PostgreSQL + pgvector + 本地 ollama（bge-m3 嵌入 / qwen2.5:7b 生成）。
 
 ## 任务
 自己实现一个 MCP server，把知识库检索暴露成标准工具。
@@ -109,10 +109,10 @@ FastAPI + LangGraph + SQLite + 本地 ollama（bge-m3 嵌入 / qwen2.5:7b 生成
 5. README 里补一节讲 MCP：协议本身、为什么自己写、和进程内调用的取舍。
 
 ## 硬约束
-- 零依赖模式必须保留（.env 改 hashing + none 就能跑通全链路），别破坏它。
+- 无模型模式必须保留（.env 改 hashing + none 就能跑通，但仍需 PG），别破坏它。
 - 改完必须跑这四个验证并和基线对比：
   python scripts/eval.py / smoke_test.py / compare_orchestration.py / verify_e2e.py
-  基线：recall@1 83.3% / 拒答 100% / 路由 100% / 等价性 6/6 / 端到端 11/11
+  基线：recall@1 87.5% / 拒答 100% / 路由 100% / 等价性 6/6 / 端到端 11/11
 - 数据类工具的 SQL 必须是预编译的白名单模板，不接受自由 SQL。
   理由（README 里有完整版）：注入面、幻觉、权限不可控，三个角度。
 - 中文回答，结论先行。有取舍先问再做。

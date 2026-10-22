@@ -40,9 +40,6 @@ class Session:
         if zero_dep:
             env["SM_EMBED_BACKEND"] = "hashing"
             env["SM_LLM_BACKEND"] = "none"
-            # 零依赖路径必须连数据库也不依赖：显式钉回 SQLite。
-            env["SM_DB_BACKEND"] = "sqlite"
-            env["SM_OPS_BACKEND"] = "sqlite"
         self.proc = subprocess.Popen(
             [sys.executable, "-m", "app.mcp.server", "--stdio"],
             cwd=ROOT,

@@ -1,19 +1,19 @@
-"""可执行工作流的存储层。
+"""可执行工作流的存储层（PostgreSQL）。
 
-和 RAG 的 Store 分开：这里存的是「操作提案 / 审计 / 工单 / 补货单」，
-不是文档切片。两个后端（SQLite / PostgreSQL）共用同一套 SQL，
-只有自增主键和占位符不同。
+存的是「操作提案 / 审计 / 工单 / 补货单」，不是文档切片。
+运行时只有一个后端；SQLite 已移除。
 """
 from __future__ import annotations
 
-import sqlite3
 import threading
-from pathlib import Path
+
+import psycopg
+from psycopg.rows import dict_row
 
 from ..config import Settings
 
 
-SQLITE_SCHEMA = """
+SCHEMA = """
 CREATE TABLE IF NOT EXISTS workflow_actions (
     action_id       TEXT PRIMARY KEY,
     kind            TEXT NOT NULL,
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS workflow_actions (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_workflow_idem
     ON workflow_actions(idempotency_key);
 CREATE TABLE IF NOT EXISTS workflow_audit (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         BIGSERIAL PRIMARY KEY,
     action_id  TEXT NOT NULL,
     event      TEXT NOT NULL,
     actor      TEXT NOT NULL,
@@ -60,80 +60,46 @@ CREATE TABLE IF NOT EXISTS restock_requests (
 );
 """
 
-PG_SCHEMA = SQLITE_SCHEMA.replace(
-    "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY"
-)
-
 
 class WorkflowDB:
-    def __init__(self, settings: Settings, sqlite_path: Path | None = None) -> None:
-        self.backend = (settings.db_backend or "sqlite").lower()
-        self.dsn = settings.pg_dsn
-        self.sqlite_path = Path(sqlite_path) if sqlite_path else settings.data_dir / "workflow.sqlite3"
+    def __init__(self, settings: Settings, dsn: str | None = None) -> None:
+        self.dsn = dsn or settings.pg_dsn
         self._local = threading.local()
         self._init_schema()
 
     # ---------- 连接 ----------
 
-    def _conn(self):
+    def _conn(self) -> psycopg.Connection:
         """线程内复用连接；写操作立即 commit。"""
         conn = getattr(self._local, "conn", None)
-        if conn is not None and not getattr(conn, "closed", 0):
+        if conn is not None and not conn.closed:
             return conn
-
-        if self.backend == "postgres":
-            import psycopg
-            from psycopg.rows import dict_row
-
-            conn = psycopg.connect(self.dsn, autocommit=True, row_factory=dict_row)
-        else:
-            self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(self.sqlite_path, timeout=10, isolation_level=None)
-            conn.row_factory = sqlite3.Row
+        conn = psycopg.connect(self.dsn, autocommit=True, row_factory=dict_row)
         self._local.conn = conn
         return conn
 
-    def _q(self, sql: str) -> str:
-        return sql.replace("?", "%s") if self.backend == "postgres" else sql
-
     def _init_schema(self) -> None:
-        schema = PG_SCHEMA if self.backend == "postgres" else SQLITE_SCHEMA
-        conn = self._conn()
-        if self.backend == "postgres":
-            with conn.cursor() as cur:
-                for stmt in schema.split(";"):
-                    if stmt.strip():
-                        cur.execute(stmt)
-        else:
-            conn.executescript(schema)
+        with self._conn().cursor() as cur:
+            for stmt in SCHEMA.split(";"):
+                if stmt.strip():
+                    cur.execute(stmt)
 
     # ---------- 通用读写 ----------
 
     def execute(self, sql: str, params: tuple = ()) -> None:
-        conn = self._conn()
-        if self.backend == "postgres":
-            with conn.cursor() as cur:
-                cur.execute(self._q(sql), params)
-        else:
-            conn.execute(self._q(sql), params)
+        with self._conn().cursor() as cur:
+            cur.execute(sql, params)
 
     def fetchone(self, sql: str, params: tuple = ()) -> dict | None:
-        conn = self._conn()
-        if self.backend == "postgres":
-            with conn.cursor() as cur:
-                cur.execute(self._q(sql), params)
-                row = cur.fetchone()
-            return dict(row) if row else None
-        row = conn.execute(self._q(sql), params).fetchone()
+        with self._conn().cursor() as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
         return dict(row) if row else None
 
     def fetchall(self, sql: str, params: tuple = ()) -> list[dict]:
-        conn = self._conn()
-        if self.backend == "postgres":
-            with conn.cursor() as cur:
-                cur.execute(self._q(sql), params)
-                return [dict(r) for r in cur.fetchall()]
-        return [dict(r) for r in conn.execute(self._q(sql), params).fetchall()]
+        with self._conn().cursor() as cur:
+            cur.execute(sql, params)
+            return [dict(r) for r in cur.fetchall()]
 
     def reset(self) -> None:
         """测试用：清空工作流相关表，不动 RAG 索引。"""
@@ -142,5 +108,5 @@ class WorkflowDB:
 
     def close(self) -> None:
         conn = getattr(self._local, "conn", None)
-        if conn is not None and not getattr(conn, "closed", 0):
+        if conn is not None and not conn.closed:
             conn.close()

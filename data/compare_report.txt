@@ -8,8 +8,7 @@
 满减和折扣券能一起用吗              policy     True       True       True      
 上周广州天河店卖了多少              data       True       True       True      
 广州天河店库存告急的有哪些            data       True       True       True      
-新入职第一天要带什么               policy     True       True       False     
-    ~ 数字差异（LLM 采样，不参与判定）: 手写 ['50'] / 图 []
+新入职第一天要带什么               policy     True       True       True      
 ------------------------------------------------------------------------------
 编排等价（intent + top1 章节 + 召回集合一致）: 6/6
 
@@ -24,7 +23,7 @@
   trace          : retrieve     召回 5 段 → 会员卡与储值规则 > 跨店使用 | 会员卡与储值规则 > 常见问题 | 会员卡与储值规则 > 卡类型
   trace          : merge        已有知识库召回，不回落
   trace          : judge        top1 词面重合度 0.67，直接作答
-  trace          : generate     llm=ollama chars=79
+  trace          : generate     llm=ollama chars=74
   top1           : 会员卡与储值规则 > 跨店使用
 
 [第 2 轮] 用户: 那退卡呢
@@ -35,7 +34,7 @@
   trace          : retrieve     召回 5 段 → 会员卡与储值规则 > 退卡与转让 | 会员卡与储值规则 > 常见问题 | 会员卡与储值规则 > 挂失与补卡
   trace          : merge        已有知识库召回，不回落
   trace          : judge        模型判定资料充足
-  trace          : generate     llm=ollama chars=124
+  trace          : generate     llm=ollama chars=96
   top1           : 会员卡与储值规则 > 退卡与转让
 
 [第 3 轮] 用户: 手续费多少
@@ -46,7 +45,7 @@
   trace          : retrieve     召回 5 段 → 会员卡与储值规则 > 退卡与转让 | 会员卡与储值规则 > 常见问题 | 会员卡与储值规则 > 卡类型
   trace          : merge        已有知识库召回，不回落
   trace          : judge        top1 词面重合度 0.67，直接作答
-  trace          : generate     llm=ollama chars=43
+  trace          : generate     llm=ollama chars=49
   top1           : 会员卡与储值规则 > 退卡与转让
 
 会话历史: ['会员卡能跨店用吗', '那退卡呢', '手续费多少']
@@ -57,8 +56,8 @@
 查询: 广州天河店上周核销活动和叠加规则有没有冲突
 路由: both (规则信号(制度类名词) + 数据信号(时间范围) + 门店/对比 → 两路都要)
   trace: route               0ms  intent=both conf=0.80 (规则信号(制度类名词) + 数据信号(时间范围) + 门店/对比 → 两路都要)
-  trace: query_data          1ms  工具=redemption_stats store=广州天河店 period=last_7d ok=True
-  trace: retrieve           53ms  召回 5 段 → 活动核销规则 > 叠加规则 | 活动核销规则 > 活动效果数据 | 活动核销规则 > 跨店核销
+  trace: query_data          8ms  工具=redemption_stats store=广州天河店 period=last_7d ok=True
+  trace: retrieve           24ms  召回 5 段 → 活动核销规则 > 叠加规则 | 活动核销规则 > 活动效果数据 | 活动核销规则 > 跨店核销
   trace: merge               0ms  工具已返回数据，不回落
   trace: judge               0ms  工具已返回数据，无需额外检索
-  trace: generate          937ms  llm=ollama chars=67
+  trace: generate          718ms  llm=ollama chars=51

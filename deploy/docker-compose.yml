@@ -12,8 +12,6 @@ services:
     ports:
       - "8000:8000"
     environment: &app-env
-      SM_DB_BACKEND: ${SM_DB_BACKEND:-postgres}
-      SM_OPS_BACKEND: ${SM_OPS_BACKEND:-postgres}
       SM_PG_DSN: ${SM_PG_DSN:-postgresql://storemind:storemind@postgres:5432/storemind}
       SM_EMBED_BACKEND: ${SM_EMBED_BACKEND:-hashing}
       SM_EMBED_DIM: ${SM_EMBED_DIM:-512}
@@ -26,7 +24,6 @@ services:
       # 让容器内的 host.docker.internal 指向宿主机（Linux 上需要显式声明）
       - "host.docker.internal:host-gateway"
     volumes:
-      - storemind-data:/app/data
       - ../corpus:/app/corpus:ro
     depends_on:
       postgres:
@@ -45,7 +42,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - storemind-data:/app/data
       - ../corpus:/app/corpus:ro
     depends_on:
       app:
@@ -80,6 +76,3 @@ services:
 
 volumes:
   pgdata:
-  # 容器自己的索引和经营库。不挂宿主机 data/：
-  # 本地开发用的是 bge-m3 索引，容器默认 hashing，混用会互相覆盖嵌入器签名。
-  storemind-data:

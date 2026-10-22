@@ -80,7 +80,7 @@ class WorkflowService:
 
         if idempotency_key:
             existing = self.db.fetchone(
-                "SELECT * FROM workflow_actions WHERE idempotency_key = ?",
+                "SELECT * FROM workflow_actions WHERE idempotency_key = %s",
                 (idempotency_key,),
             )
             if existing:
@@ -95,7 +95,7 @@ class WorkflowService:
             """INSERT INTO workflow_actions
                (action_id,kind,status,store_name,summary,payload,risk,requires_role,
                 created_by,created_at,idempotency_key)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (
                 action_id, kind, "pending", store_name, summary,
                 json.dumps(payload, ensure_ascii=False), risk, requires_role,
@@ -105,7 +105,7 @@ class WorkflowService:
         self._audit(action_id, "proposed", actor, summary)
 
         return self._public(self.db.fetchone(
-            "SELECT * FROM workflow_actions WHERE action_id = ?", (action_id,)
+            "SELECT * FROM workflow_actions WHERE action_id = %s", (action_id,)
         ))
 
     def _describe(self, kind: str, store_name: str, payload: dict) -> tuple[str, str, str]:
@@ -162,7 +162,7 @@ class WorkflowService:
             }
             self.db.execute(
                 "INSERT INTO tickets(ticket_id,store_name,category,summary,status,created_at) "
-                "VALUES(?,?,?,?,?,?)",
+                "VALUES(%s,%s,%s,%s,%s,%s)",
                 (result["ticket_id"], action["store_name"], result["category"],
                  action["summary"], "open", now),
             )
@@ -175,14 +175,14 @@ class WorkflowService:
             }
             self.db.execute(
                 "INSERT INTO restock_requests(request_id,store_name,item_name,qty,unit,status,created_at) "
-                "VALUES(?,?,?,?,?,?,?)",
+                "VALUES(%s,%s,%s,%s,%s,%s,%s)",
                 (result["request_id"], action["store_name"], result["item_name"],
                  result["qty"], payload.get("unit") or "份", "pending_fulfillment", now),
             )
 
         self.db.execute(
-            "UPDATE workflow_actions SET status=?, decided_by=?, decided_at=?, result=? "
-            "WHERE action_id=?",
+            "UPDATE workflow_actions SET status=%s, decided_by=%s, decided_at=%s, result=%s "
+            "WHERE action_id=%s",
             ("confirmed", actor, now, json.dumps(result, ensure_ascii=False), action_id),
         )
         self._audit(action_id, "confirmed", actor, json.dumps(result, ensure_ascii=False))
@@ -208,8 +208,8 @@ class WorkflowService:
         now = _now()
         result = {"reason": reason or "未填写原因"}
         self.db.execute(
-            "UPDATE workflow_actions SET status=?, decided_by=?, decided_at=?, result=? "
-            "WHERE action_id=?",
+            "UPDATE workflow_actions SET status=%s, decided_by=%s, decided_at=%s, result=%s "
+            "WHERE action_id=%s",
             ("rejected", actor, now, json.dumps(result, ensure_ascii=False), action_id),
         )
         self._audit(action_id, "rejected", actor, result["reason"])
@@ -220,7 +220,7 @@ class WorkflowService:
     def list_pending(self, store_name: str = "") -> list[dict]:
         if store_name:
             rows = self.db.fetchall(
-                "SELECT * FROM workflow_actions WHERE status='pending' AND store_name LIKE ? "
+                "SELECT * FROM workflow_actions WHERE status='pending' AND store_name LIKE %s "
                 "ORDER BY created_at DESC",
                 (f"%{store_name}%",),
             )
@@ -244,7 +244,7 @@ class WorkflowService:
         self._get(action_id)  # 404 if missing
         return self.db.fetchall(
             "SELECT event,actor,detail,created_at FROM workflow_audit "
-            "WHERE action_id=? ORDER BY id",
+            "WHERE action_id=%s ORDER BY id",
             (action_id,),
         )
 
@@ -252,7 +252,7 @@ class WorkflowService:
 
     def _get(self, action_id: str) -> dict:
         row = self.db.fetchone(
-            "SELECT * FROM workflow_actions WHERE action_id = ?", (action_id,)
+            "SELECT * FROM workflow_actions WHERE action_id = %s", (action_id,)
         )
         if not row:
             raise NotFound(f"提案不存在: {action_id}")
@@ -261,7 +261,7 @@ class WorkflowService:
     def _audit(self, action_id: str, event: str, actor: str, detail: str = "") -> None:
         self.db.execute(
             "INSERT INTO workflow_audit(action_id,event,actor,detail,created_at) "
-            "VALUES(?,?,?,?,?)",
+            "VALUES(%s,%s,%s,%s,%s)",
             (action_id, event, actor, detail, _now()),
         )
 

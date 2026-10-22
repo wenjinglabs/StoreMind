@@ -18,7 +18,7 @@
 两个分支同一 superstep 并行执行，merge 等两路都完成才放行。
 **judge → rewrite → retrieve_again → judge 这个环是本项目的 Agent 层**——
 图里唯一的条件边，也是唯一一处「走哪条路由模型运行时决定」的地方。
-编排用 LangGraph，会话状态走 SQLite checkpointer，`thread_id` 一给就有多轮上下文。
+编排用 LangGraph，会话状态走 PostgreSQL checkpointer，`thread_id` 一给就有多轮上下文。
 
 **同一套逻辑有两套实现**：`agent/graph.py`（LangGraph，图里的环）和 `agent/pipeline.py`（手写状态机，while 循环）。
 `scripts/compare_orchestration.py` 会验证两条路径输出一致——6/6 通过。
@@ -58,11 +58,20 @@ uvicorn app.main:app --reload --port 8000
 
 打开 **`http://127.0.0.1:8000/`** 是可以直接对话的页面。或者 `http://127.0.0.1:8000/docs` 看接口。
 
-### 方式二：零依赖跑通（不需要 GPU）
+### 方式二：本地 Python（复用 Docker 里的 PostgreSQL）
 
-不装 ollama 也能跑：把 `.env` 里的 `SM_EMBED_BACKEND` 改成 `hashing`、`SM_LLM_BACKEND` 改成 `none`，
-嵌入走自实现的字符 n-gram 哈希，生成走抽取式兜底。
-不装 PostgreSQL、不拉模型也能完整看到检索链路——这是 CI 和回归测试用的配置。
+运行时只有一个存储后端：PostgreSQL + pgvector。先起数据库：
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d postgres
+pip install -r requirements.txt
+python scripts/seed_ops_db.py
+python scripts/build_index.py --rebuild
+uvicorn app.main:app --reload --port 8000
+```
+
+不想拉模型时，把 `SM_EMBED_BACKEND=hashing`、`SM_LLM_BACKEND=none`：
+仍然需要 PostgreSQL（compose 提供），但不需要 GPU 和 ollama。
 
 ### 方式三：Docker（不装 Python、不需要模型）
 
@@ -74,9 +83,8 @@ python scripts/verify_docker.py      # 部署验证 10/10
 ```
 
 默认是零依赖模式（`hashing + none`）：镜像自带 8 篇语料，启动时自动建经营库和索引，
-不需要 GPU、不需要宿主机 ollama。**存储默认 PostgreSQL + pgvector**（compose 会起 postgres
-服务并等它健康）；想退回纯 SQLite，设 `SM_DB_BACKEND=sqlite SM_OPS_BACKEND=sqlite`。
-要接宿主机上的 ollama（答案质量更好）：
+不需要 GPU、不需要宿主机 ollama。**存储固定 PostgreSQL + pgvector**（compose 会起
+postgres 服务并等它健康）；没有 SQLite 回退路径。要接宿主机上的 ollama（答案质量更好）：
 
 ```powershell
 # PowerShell
@@ -276,8 +284,8 @@ python scripts/build_index.py
 | recall@1 | 79.2% | **87.5%** | **+8.3** |
 | recall@3 / @5 | 95.8% / 95.8% | 95.8% / 95.8% | +0.0 |
 | **答案引用正确来源** | 95.8% | 95.8% | **+0.0（零回退）** |
-| 平均延迟 | 862ms | 878ms | +16ms |
-| 最大延迟 | 2297ms | 2153ms | -144ms |
+| 平均延迟 | 887ms | 945ms | +58ms |
+| 最大延迟 | 1520ms | 1633ms | +113ms |
 | 触发重查 | 0/24 | 6/24 | +6 |
 | 重查后 top1 **变差** | — | **0** | 零回退 |
 
@@ -329,7 +337,7 @@ A/B 实验就是这么做的。
 
 | 指标 | 数值 | 字符哈希时期 |
 |---|---|---|
-| recall@1 | 83.3% | 81.0% |
+| recall@1 | 87.5% | 81.0% |
 | recall@3 | 95.8% | 90.5% |
 | recall@5 | 95.8% | 95.2% |
 | 文档命中 | 95.8% | 95.2% |
@@ -339,22 +347,14 @@ A/B 实验就是这么做的。
 | 路由准确率 | 100.0% | 89.3% |
 | 编排等价性 | 6/6 | 6/6 |
 
-> recall@1 从 81.0% 变成 83.3% 不是退步——金标集从 21 条扩到 24 条（加了 3 条
-> 真实用户会问的边界场景），分母变大了。recall@3 从 90.5% 升到 95.8% 才是真实提升。
->
-> 拒答率从 0% 到 100% 是**接上 LLM 之后**才成立的。字符哈希时期检索永远返回 top5，
-> 哪怕全是不相关内容，模型没有判断依据，只能硬答。
-> 这一条直接印证了 README 里那个结论：**拒答是语义判断，不是打分任务**。
->
-> 开启 Agent 层（自检重查）额外带来 recall@1 **+8.3** 个点，
-> 详细对照见上面「Agent 层」一节。
+> recall@1 当前为 87.5%（bge-m3 + PG）。自检重查的判定由模型做，重复运行会有波动；
+> 下面的 A/B 对照里 A 组 79.2%、B 组 87.5%，这组差异才是「Agent 层带来多少」的量化。
 
 **端到端真实验证**（`scripts/verify_e2e.py`，走 HTTP 打真模型，11 条用例）：11/11 无思考过程泄漏，10/11 章节命中。
 **答案稳定性**（`scripts/probe_stability.py`，同一问题连跑 5 次）：关键内容 5/5 稳定。
 
-**PostgreSQL 后端复跑**：87.5% / 95.8% / 95.8%。与 SQLite 的 83.3% 差异来自自检重查的
-模型判定波动（同一份索引重复跑也会变），**不是后端差异**；后端一致性以 parity 的
-top1 24/24、召回集合 24/24、工具 5/5 为准。
+**PostgreSQL 后端实跑**：87.5% / 95.8% / 95.8%，A/B 延迟 +58ms。所有验证脚本默认连
+`deploy/docker-compose.yml` 里的 postgres（宿主 5433），不再有第二套存储。
 
 ### 关于向量权重的对照实验
 
@@ -419,25 +419,15 @@ qwen2.5:7b 答的是 300 元。系统提示词里第 3 条「涉及金额必须�
 
 **踩过的坑**：第一版 overlap 是直接截上一块最后 60 个字符贴到下一块开头，结果每个 chunk 开头都是半句话，生成时模型读到错位的上文。改成按完整句子从后往前取，且只在同一章节内做 overlap。
 
-### 2. 为什么用 pgvector，而不是独立向量库 / 纯 SQLite
+### 2. 为什么用 PostgreSQL + pgvector，而不是独立向量库 / 纯内存检索
 
-**部署路径是 PostgreSQL + pgvector**：知识库向量和经营数据在同一个库，能做 JOIN、走事务、备份一套搞定；比 Qdrant / Milvus 少一个要运维的组件。
+部署路径是 PostgreSQL + pgvector：知识库向量、经营数据、工作流/审计、LangGraph checkpoint 都在同一个库，能做 JOIN、走事务、备份一套搞定；比 Qdrant / Milvus 少一个要运维的组件。
 
-**SQLite 没有删，作为零依赖 / CI 后端保留**：clone 下来不装 PostgreSQL、不拉模型也能跑通（`SM_DB_BACKEND=sqlite` + hashing + none）。两个后端接口一致，上层 Pipeline / Agent / MCP 不需要知道用的是哪个。
+**运行时只有这一个后端**：`build_store` / `build_ops_tools` / `WorkflowDB` / `PostgresSaver` 全部固定 PG，SQLite 已移除。本地跑脚本需要 compose 的 postgres（宿主 5433）；Docker 一键起。
 
-**迁移不是口头承诺**：`scripts/parity_backends.py` 用同一语料、同一 bge-m3 嵌入分别建 SQLite 和 PG 索引，对照结果：
+**为什么不把 BM25 下推给 PG**：`chunk_terms` + Python 打分保留在应用层，换成 `tsvector` 是 TF-IDF 类实现，会改变词法召回；中文全文检索的生产方案是 zhparser / pg_jieba。向量走 HNSW，词法走应用层 BM25，RRF 融合也在应用层，k 和权重能跟着评估集调。
 
-| 项 | 结果 |
-|---|---|
-| 索引规模 docs / chunks / terms | 8 / 45 / 3664，两边一致 |
-| 24 条规则题 top1 | 24/24 一致 |
-| 24 条规则题 top5 召回集合 | 24/24 一致 |
-| 5 个经营数据工具输出 | 5/5 逐行一致 |
-| 单次 hybrid_search（含嵌入） | SQLite 16.3ms · PG 59.5ms |
-
-最后一行是真实的：**45 个 chunk 的规模上 PG 更慢**，多出来的主要是网络往返和 HNSW 的固定开销。迁移的收益在并发、多实例和 10 万 chunk 以上的 ANN 场景，不是单机小数据。这个结论本身比「PG 更快」更值得讲。
-
-BM25 仍留在应用层（`chunk_terms` 表 + Python 打分），没有换成 PG 的 `tsvector`：换成 TF-IDF 类实现会改变词法召回，迁移前后的指标就不可比了。中文全文检索的生产方案是 zhparser / pg_jieba。
+**小数据不是 PG 的强项**：45 个 chunk 下 HNSW + 网络往返有明显固定开销，单次 `hybrid_search` 约 60ms（含 bge-m3 嵌入）；PG 的收益在并发、多实例和 10 万 chunk 以上的 ANN，不是单机小数据。这个结论比“PG 更快”更值得讲。
 
 ### 3. 为什么要混合检索，以及一个反直觉的发现
 
@@ -481,7 +471,7 @@ RRF 的副作用不是加噪声，是**稀释**。
 **迁移的真实收益**（不是"用了框架"这种理由）：
 
 - **并行 fan-out**。手写版要自己管「两路都要」时的并发和异常合并；图里 `add_edge("route","a")` + `add_edge("route","b")` 就是并行，merge 自动等两边。
-- **checkpoint**。多轮会话持久化在手写版是自己维护一个 dict，图里是 `thread_id` 的事，还附带中断恢复。state 落在 SQLite，服务重启会话还在。
+- **checkpoint**。多轮会话持久化在手写版是自己维护一个 dict，图里是 `thread_id` 的事，还附带中断恢复。state 落在 PostgreSQL，服务重启会话还在。
 - **可观测**。每个节点、每条边都在 trace 里，出事能定位到边。
 - **环**。这是加 Agent 层之后才体会到的。手写版的自检重查是一个 `for` 循环加一堆状态回退；
   图里就是 `judge → rewrite → retrieve_again → judge` 两条边。
@@ -588,19 +578,19 @@ app/
     router.py          意图路由（句式正则，强/弱信号分层）
     judge.py           证据充分性判定 + 查询改写（Agent 层的核心）
     pipeline.py        手写状态机：route → retrieve/query → judge/rewrite 循环 → answer
-    graph.py           LangGraph 编排（并行 fan-out + 自检重查环 + SQLite checkpointer）
+    graph.py           LangGraph 编排（并行 fan-out + 自检重查环 + PostgreSQL checkpointer）
     llm.py             生成层（none / ollama / openai 兼容）
   rag/
     chunker.py         标题层级语义切分
     embedder.py        嵌入层（hashing / ollama）
-    store.py           SQLite 实现（零依赖路径）+ 自实现 BM25
-    pg_store.py        PostgreSQL + pgvector（HNSW），接口与 store.py 一致
+    store.py           共享类型（Hit / tokenize）与 build_store 工厂
+    pg_store.py        PostgreSQL + pgvector（HNSW），唯一存储实现
     retriever.py       混合召回 + 加权 RRF + 路径加权重排
   tools/
-    ops_tools.py       白名单结构化查询工具（SQLite）
-    pg_ops.py          同一组工具（PostgreSQL）
+    ops_tools.py       共享类型（ToolResult / Period）与 build_ops_tools 工厂
+    pg_ops.py          白名单经营数据工具（PostgreSQL）
   workflow/
-    db.py              操作提案 / 审计 / 工单表（SQLite + PG）
+    db.py              操作提案 / 审计 / 工单表（PostgreSQL）
     service.py         提案 → 确认/拒绝，权限、幂等、审计
   mcp/
     server.py          自实现 MCP server（JSON-RPC 2.0 + tools/resources + stdio/HTTP）
@@ -629,7 +619,6 @@ scripts/
   mcp_smoke_test.py    MCP 协议冒烟：握手 / 通知 / 工具 / 资源 / 三类错误码
   verify_docker.py     Docker 部署验证：app 三个接口 + MCP 四个方法 + 工作流
   workflow_test.py     工作流：提案/确认/越权/幂等/审计
-  parity_backends.py   SQLite ↔ PostgreSQL 迁移对照：索引 / 召回 / 工具输出
   dump_prompt.py       导出真实 prompt 排查
   dump_chunks.py       导出语料切片结果，定位某句话落在哪一段
   dump_judge.py        导出 judge 模型的原始输出，查解析失败
@@ -647,15 +636,15 @@ mcp.example.json       MCP 客户端配置示例
 - [x] 拒答：交给 LLM 做语义判断，评估报告里从 N/A 变成 100%
 - [x] 答案稳定性验证：同一问题连跑 5 次，关键内容 5/5
 - [x] **Agent 层：自检 → 改写 → 重查循环**。图里唯一的条件边和环，
-      A/B 对照 recall@1 +8.3 个点、答案正确率零回退、延迟 +16ms
+      A/B 对照 recall@1 +8.3 个点、答案正确率零回退、延迟 +58ms
 - [x] **自写 MCP server**：自己实现 JSON-RPC 2.0 与 MCP 握手，暴露 13 个工具 + 8 篇语料资源，
       stdio / HTTP 两种传输，协议冒烟 14/14（含零依赖模式）
 - [x] **可执行工作流**：客诉工单 / 补货申请，提案 → 人工确认 → 落库 + 审计；
       角色权限、幂等、拒绝全部覆盖，测试 9/9
-- [x] **Docker 化**：零依赖默认配置，`docker compose up` 同时起 PG + app + MCP；
+- [x] **Docker 化**：`docker compose up` 起 PG + app + MCP，无需 GPU / 模型也能跑；
       镜像 334MB，部署验证 10/10（hashing + none / ollama 各测一次）
-- [x] **PostgreSQL + pgvector 迁移**：HNSW 索引，知识库与经营数据同库；
-      SQLite 保留为零依赖后端，迁移对照 4/4（top1 24/24、召回集合 24/24、工具 5/5）
+- [x] **全栈 PostgreSQL + pgvector**：HNSW 索引，知识库 / 经营数据 / 工作流 /
+      会话 checkpoint 都在 PG；SQLite 已从运行时移除
 - [ ] Redis 语义缓存：query embedding 相似度 > 0.95 直接返回
 - [ ] 加 rerank 模型（bge-reranker），解决 top1 排序不理想这个最大短板
 - [ ] LLM 版指代消解：当前「那退卡呢」靠规则借上文，复杂追问会失效

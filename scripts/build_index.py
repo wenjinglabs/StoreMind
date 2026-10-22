@@ -67,7 +67,7 @@ def main() -> None:
         emit(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         emit(f"corpus      : {result['corpus_dir']}")
-        emit(f"storage     : {settings.db_backend} (dim={settings.embed_dim})")
+        emit(f"storage     : postgres (dim={settings.embed_dim})")
         emit(f"embedder    : {embedder.name} (dim={embedder.dim})")
         if force_rebuild:
             emit(f"!! 嵌入器已变更 ({prev_sig} -> {cur_sig})，已强制重建索引")

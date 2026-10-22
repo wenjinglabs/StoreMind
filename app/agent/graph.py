@@ -15,19 +15,19 @@ pipeline.py 是手写的顺序调用，graph.py 是 LangGraph 的图。两者共
 from __future__ import annotations
 
 import contextvars
-import sqlite3
 import time
-from pathlib import Path
 from typing import Annotated, TypedDict
 
+import psycopg
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph
 
 from ..config import Settings
 from ..rag.embedder import Embedder
-from ..rag.store import Hit, Store
-from ..tools.ops_tools import OpsTools
+from ..rag.pg_store import PgStore
+from ..rag.store import Hit
+from ..tools.pg_ops import PgOpsTools
 from .judge import EvidenceJudge, merge_hits
 from .llm import LLM
 from .pipeline import AgentState, Pipeline, Step
@@ -75,21 +75,18 @@ MAX_ATTEMPTS = 2
 class GraphAgent:
     def __init__(
         self,
-        store: Store,
+        store: PgStore,
         embedder: Embedder,
         llm: LLM,
-        tools: OpsTools,
+        tools: PgOpsTools,
         settings: Settings,
-        checkpoint_path: Path | None = None,
     ) -> None:
         self.pipe = Pipeline(store, embedder, llm, tools, settings)
         self.settings = settings
         # Agent 层：证据充分性判定器。规则层先行，模型层兜底。
         self.judge = EvidenceJudge(llm)
-        path = checkpoint_path or (settings.data_dir / "checkpoints.sqlite3")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # check_same_thread=False：FastAPI 的线程池会跨线程复用连接
-        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        # 会话状态也放 PostgreSQL：运行时不再依赖 SQLite 文件。
+        self._conn = psycopg.connect(settings.pg_dsn, autocommit=True)
         # state 里存的是 Hit / ToolResult 这类业务 dataclass。
         # langgraph 的新版序列化默认只信任内置类型，从旧 checkpoint 读回来会警告
         # （未来版本直接拒绝）。这里显式登记，避免服务重启后会话读不回来。
@@ -97,7 +94,8 @@ class GraphAgent:
             ("app.rag.store", "Hit"),
             ("app.tools.ops_tools", "ToolResult"),
         ])
-        self.checkpointer = SqliteSaver(self._conn, serde=serde)
+        self.checkpointer = PostgresSaver(self._conn, serde=serde)
+        self.checkpointer.setup()
         self.graph = self._build()
 
     # ---------- 状态搬运 ----------

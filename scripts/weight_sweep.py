@@ -28,6 +28,7 @@ from app.config import settings  # noqa: E402
 from app.rag.embedder import build_embedder  # noqa: E402
 from app.rag.retriever import _path_bonus, expand_query, rrf_fuse  # noqa: E402
 from app.rag.store import build_store  # noqa: E402
+from app.rag.pg_store import PgStore  # noqa: E402
 
 WEIGHTS = [0.0, 0.15, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0]
 
@@ -37,7 +38,7 @@ def load_cases() -> list[dict]:
     return data["cases"] if isinstance(data, dict) else data
 
 
-def run_sweep(store: Store, embedder, cases: list[dict]) -> list[dict]:
+def run_sweep(store: PgStore, embedder, cases: list[dict]) -> list[dict]:
     rows: list[dict] = []
     for w in WEIGHTS:
         hit1 = hit3 = hit5 = total = 0

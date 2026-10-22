@@ -95,9 +95,9 @@ def health() -> dict:
         "embed_backend": _embedder.name,
         "llm_backend": _llm.name,
         "engine": "langgraph",
-        "db_backend": settings.db_backend,
-        "ops_backend": settings.ops_backend,
-        "db": "postgres" if settings.db_backend == "postgres" else str(settings.db_path),
+        "db_backend": "postgres",
+        "ops_backend": "postgres",
+        "db": "postgres",
         "workflow_pending": _workflow.pending_count(),
         "stats": _store.stats(),
     }

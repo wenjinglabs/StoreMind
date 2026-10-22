@@ -3,12 +3,13 @@
 这是「规则在文档里、事实在数据库里」的那一半。
 数据是构造的，但分布刻意贴近真实：周末订单量高、高单价品项拉高客单价、
 活动核销集中在上半月。
+
+运行时只写 PostgreSQL；SQLite 已移除。
 """
 from __future__ import annotations
 
 import argparse
 import random
-import sqlite3
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -18,8 +19,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import settings  # noqa: E402
-
-DB = settings.data_dir / "ops.sqlite3"
 
 STORES = [
     ("S001", "广州天河店", "广州"),
@@ -58,22 +57,22 @@ CREATE TABLE orders (
     order_id TEXT PRIMARY KEY,
     store_id TEXT NOT NULL,
     biz_date TEXT NOT NULL,
-    amount   REAL NOT NULL,
+    amount   DOUBLE PRECISION NOT NULL,
     status   TEXT NOT NULL
 );
 CREATE TABLE order_items (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    id        BIGSERIAL PRIMARY KEY,
     order_id  TEXT NOT NULL,
     item_name TEXT NOT NULL,
     qty       INTEGER NOT NULL,
-    price     REAL NOT NULL
+    price     DOUBLE PRECISION NOT NULL
 );
 CREATE TABLE redemptions (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    id            BIGSERIAL PRIMARY KEY,
     store_id      TEXT NOT NULL,
     activity_name TEXT NOT NULL,
     redeem_date   TEXT NOT NULL,
-    amount        REAL NOT NULL
+    amount        DOUBLE PRECISION NOT NULL
 );
 CREATE TABLE inventory (
     store_id  TEXT NOT NULL,
@@ -86,15 +85,9 @@ CREATE INDEX idx_orders_date ON orders(biz_date);
 CREATE INDEX idx_orders_store ON orders(store_id);
 """
 
-# PostgreSQL 方言：自增主键和 REAL 需要换掉。生成逻辑和 SQLite 完全共用，
-# 保证两个后端的经营数据逐行一致——这是迁移对照实验的前提。
-PG_SCHEMA = SCHEMA.replace(
-    "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY"
-).replace(" REAL NOT NULL", " DOUBLE PRECISION NOT NULL")
 
-
-class PgSeedConn:
-    """把 seed 脚本里的 ? 占位符转成 psycopg 的 %s，生成逻辑一行不用改。"""
+class SeedConn:
+    """把生成代码里的 ? 占位符转成 psycopg 的 %s。"""
 
     def __init__(self, dsn: str) -> None:
         import psycopg
@@ -121,20 +114,11 @@ class PgSeedConn:
         self.conn.close()
 
 
-def main(days: int = 60, seed: int = 42, backend: str = "", dsn: str = "") -> None:
+def main(days: int = 60, seed: int = 42, dsn: str = "") -> None:
     rnd = random.Random(seed)
-    backend = (backend or settings.ops_backend or "sqlite").lower()
-    if backend == "postgres":
-        conn = PgSeedConn(dsn or settings.pg_dsn)
-        schema = PG_SCHEMA
-    else:
-        settings.ensure_dirs()
-        if DB.exists():
-            DB.unlink()
-        conn = sqlite3.connect(DB)
-        schema = SCHEMA
+    conn = SeedConn(dsn or settings.pg_dsn)
 
-    conn.executescript(schema)
+    conn.executescript(SCHEMA)
     conn.executemany("INSERT INTO stores VALUES(?,?,?)", STORES)
 
     today = date.today()
@@ -200,16 +184,14 @@ def main(days: int = 60, seed: int = 42, backend: str = "", dsn: str = "") -> No
     conn.commit()
     conn.close()
 
-    target = "postgres" if backend == "postgres" else DB
-    print(f"ops db 生成完成: {target}")
+    print("ops db 生成完成: postgres")
     print(f"  门店 {len(STORES)} 家，订单 {total_orders} 单，明细 {total_items} 行，覆盖 {days} 天")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--backend", default="", choices=["", "sqlite", "postgres"])
     ap.add_argument("--dsn", default="")
     ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
-    main(days=args.days, seed=args.seed, backend=args.backend, dsn=args.dsn)
+    main(days=args.days, seed=args.seed, dsn=args.dsn)

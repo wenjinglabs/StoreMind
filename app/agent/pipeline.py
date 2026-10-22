@@ -15,9 +15,11 @@ import time
 from dataclasses import dataclass, field
 
 from ..config import Settings
-from ..tools.ops_tools import OpsTools, ToolResult
+from ..tools.ops_tools import ToolResult
+from ..tools.pg_ops import PgOpsTools
 from ..rag.retriever import hybrid_search
-from ..rag.store import Hit, Store
+from ..rag.store import Hit
+from ..rag.pg_store import PgStore
 from .judge import EvidenceJudge, merge_hits
 from .llm import LLM
 from .router import Intent, classify
@@ -106,7 +108,7 @@ def _extract_period(q: str) -> str:
 
 
 class Pipeline:
-    def __init__(self, store: Store, embedder, llm: LLM, tools: OpsTools, settings: Settings):
+    def __init__(self, store: PgStore, embedder, llm: LLM, tools: PgOpsTools, settings: Settings):
         self.store = store
         self.embedder = embedder
         self.llm = llm

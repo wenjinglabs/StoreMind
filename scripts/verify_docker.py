@@ -29,8 +29,8 @@ def main() -> int:
     ap.add_argument("--mcp", default="http://127.0.0.1:8765")
     ap.add_argument("--expect-embed", default="hashing", help="hashing | ollama")
     ap.add_argument("--expect-llm", default="none", help="none | ollama | openai")
-    ap.add_argument("--expect-db", default="postgres", help="sqlite | postgres")
-    ap.add_argument("--expect-ops", default="postgres", help="sqlite | postgres")
+    ap.add_argument("--expect-db", default="postgres", help="当前固定为 postgres")
+    ap.add_argument("--expect-ops", default="postgres", help="当前固定为 postgres")
     ap.add_argument("--out", default="data/docker_verify.txt")
     args = ap.parse_args()
 

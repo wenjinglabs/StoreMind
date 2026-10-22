@@ -1,16 +1,16 @@
-Docker 部署验证 · 2026-10-22T20:30:28
+Docker 部署验证 · 2026-10-22T21:07:50
 app=http://127.0.0.1:8000  mcp=http://127.0.0.1:8765
 期望后端: embed=hashing llm=none db=postgres ops=postgres
 
 [PASS] app /health（零依赖配置） · embed=hashing llm=none db=postgres/postgres docs=8 chunks=45 (8ms)
-[PASS] app /chat 规则题 · intent=policy 引用=5 答案=477字 (93ms)
-[PASS] app /chat 数据题 · tool=store_sales revenue=51115.0 (84ms)
-[PASS] app 前端页面 · HTTP 200 · 29364 字符 (24ms)
-[PASS] mcp /health · tools=13 docs=8 (31ms)
-[PASS] mcp initialize · protocol=2025-06-18 (26ms)
-[PASS] mcp tools/call search_knowledge · 5 段 · top1=客诉处理手册 > 酒水异味或品质问题 (23ms)
-[PASS] mcp tools/call ask_storemind · intent=data 数据=store_sales 轨迹=6步 (99ms)
-[PASS] 工作流：客诉工单 提案→确认→审计 · ticket_id=T-20261022-AA3385 审计=2条 (36ms)
-[PASS] 工作流：补货越权→店长确认 · 店员403、店长确认 request_id=R-20261022-5A8A8A (80ms)
+[PASS] app /chat 规则题 · intent=policy 引用=5 答案=477字 (94ms)
+[PASS] app /chat 数据题 · tool=store_sales revenue=51115.0 (79ms)
+[PASS] app 前端页面 · HTTP 200 · 29364 字符 (30ms)
+[PASS] mcp /health · tools=13 docs=8 (17ms)
+[PASS] mcp initialize · protocol=2025-06-18 (2ms)
+[PASS] mcp tools/call search_knowledge · 5 段 · top1=客诉处理手册 > 酒水异味或品质问题 (10ms)
+[PASS] mcp tools/call ask_storemind · intent=data 数据=store_sales 轨迹=6步 (94ms)
+[PASS] 工作流：客诉工单 提案→确认→审计 · ticket_id=T-20261022-9675F6 审计=2条 (47ms)
+[PASS] 工作流：补货越权→店长确认 · 店员403、店长确认 request_id=R-20261022-381E0D (50ms)
 
 结果 10/10

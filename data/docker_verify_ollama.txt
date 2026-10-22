@@ -1,16 +1,16 @@
-Docker 部署验证 · 2026-10-22T20:30:09
+Docker 部署验证 · 2026-10-22T21:15:19
 app=http://127.0.0.1:8000  mcp=http://127.0.0.1:8765
 期望后端: embed=ollama llm=ollama db=postgres ops=postgres
 
-[PASS] app /health（零依赖配置） · embed=ollama llm=ollama db=postgres/postgres docs=8 chunks=45 (7ms)
-[PASS] app /chat 规则题 · intent=policy 引用=5 答案=49字 (604ms)
-[PASS] app /chat 数据题 · tool=store_sales revenue=51115.0 (363ms)
-[PASS] app 前端页面 · HTTP 200 · 29364 字符 (7ms)
-[PASS] mcp /health · tools=13 docs=8 (8ms)
+[PASS] app /health（零依赖配置） · embed=ollama llm=ollama db=postgres/postgres docs=8 chunks=45 (6ms)
+[PASS] app /chat 规则题 · intent=policy 引用=5 答案=42字 (660ms)
+[PASS] app /chat 数据题 · tool=store_sales revenue=51115.0 (305ms)
+[PASS] app 前端页面 · HTTP 200 · 29364 字符 (2ms)
+[PASS] mcp /health · tools=13 docs=8 (29ms)
 [PASS] mcp initialize · protocol=2025-06-18 (2ms)
-[PASS] mcp tools/call search_knowledge · 5 段 · top1=客诉处理手册 > 酒水异味或品质问题 (29ms)
-[PASS] mcp tools/call ask_storemind · intent=data 数据=store_sales 轨迹=6步 (365ms)
-[PASS] 工作流：客诉工单 提案→确认→审计 · ticket_id=T-20261022-0E50AE 审计=2条 (76ms)
-[PASS] 工作流：补货越权→店长确认 · 店员403、店长确认 request_id=R-20261022-22ABD1 (60ms)
+[PASS] mcp tools/call search_knowledge · 5 段 · top1=客诉处理手册 > 酒水异味或品质问题 (24ms)
+[PASS] mcp tools/call ask_storemind · intent=data 数据=store_sales 轨迹=6步 (299ms)
+[PASS] 工作流：客诉工单 提案→确认→审计 · ticket_id=T-20261022-F0E10E 审计=2条 (99ms)
+[PASS] 工作流：补货越权→店长确认 · 店员403、店长确认 request_id=R-20261022-5692F0 (141ms)
 
 结果 10/10

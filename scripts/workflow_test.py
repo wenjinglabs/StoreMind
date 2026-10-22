@@ -1,6 +1,7 @@
 """工作流测试：提案 → 确认/拒绝 → 落库 → 审计。
 
-用临时 SQLite 库，不依赖 ollama / PostgreSQL，可以直接在零依赖环境跑。
+用独立测试库 storemind_test（PostgreSQL），不碰演示库。
+需要 compose 里的 postgres 正在运行。
 
     python scripts/workflow_test.py
 """
@@ -9,6 +10,9 @@ from __future__ import annotations
 import sys
 from datetime import datetime
 from pathlib import Path
+
+import psycopg
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -22,17 +26,23 @@ from app.workflow.service import (  # noqa: E402
     WorkflowService,
 )
 
-DB_PATH = settings.data_dir / "_workflow_test.sqlite3"
+TEST_DB = "storemind_test"
+
+
+def _test_dsn() -> str:
+    info = conninfo_to_dict(settings.pg_dsn)
+    admin = dict(info, dbname="postgres")
+    with psycopg.connect(make_conninfo(**admin), autocommit=True) as c:
+        exists = c.execute(
+            "SELECT 1 FROM pg_database WHERE datname=%s", (TEST_DB,)
+        ).fetchone()
+        if not exists:
+            c.execute(f'CREATE DATABASE "{TEST_DB}"')
+    return make_conninfo(**dict(info, dbname=TEST_DB))
 
 
 def main() -> int:
-    settings.ensure_dirs()
-    for suffix in ("", "-wal", "-shm"):
-        p = Path(str(DB_PATH) + suffix)
-        if p.exists():
-            p.unlink()
-
-    db = WorkflowDB(settings, sqlite_path=DB_PATH)
+    db = WorkflowDB(settings, dsn=_test_dsn())
     db.reset()
     svc = WorkflowService(db)
     checks: list[tuple[str, bool, str]] = []
@@ -71,7 +81,7 @@ def main() -> int:
         out = svc.confirm(ticket["action_id"], role="clerk", actor="clerk-01")
         assert out["status"] == "confirmed", out
         tid = out["result"]["ticket_id"]
-        row = db.fetchone("SELECT * FROM tickets WHERE ticket_id=?", (tid,))
+        row = db.fetchone("SELECT * FROM tickets WHERE ticket_id=%s", (tid,))
         assert row and row["summary"].startswith("客诉工单"), row
         events = [e["event"] for e in svc.audit(ticket["action_id"])]
         assert events == ["proposed", "confirmed"], events
@@ -96,7 +106,7 @@ def main() -> int:
             pass
         else:
             raise AssertionError("店员确认补货应被拒绝")
-        row = db.fetchone("SELECT status FROM workflow_actions WHERE action_id=?", (restock["action_id"],))
+        row = db.fetchone("SELECT status FROM workflow_actions WHERE action_id=%s", (restock["action_id"],))
         assert row["status"] == "pending", row
         events = [e["event"] for e in svc.audit(restock["action_id"])]
         assert "permission_denied" in events, events
@@ -108,7 +118,7 @@ def main() -> int:
         out = svc.confirm(restock["action_id"], role="manager", actor="manager-01")
         assert out["status"] == "confirmed", out
         rid = out["result"]["request_id"]
-        row = db.fetchone("SELECT * FROM restock_requests WHERE request_id=?", (rid,))
+        row = db.fetchone("SELECT * FROM restock_requests WHERE request_id=%s", (rid,))
         assert row and row["qty"] == 20, row
         return f"request_id={rid} qty={row['qty']}"
 

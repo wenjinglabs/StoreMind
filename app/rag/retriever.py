@@ -9,7 +9,8 @@
 """
 from __future__ import annotations
 
-from .store import Hit, Store, tokenize
+from .store import Hit, tokenize
+from .pg_store import PgStore
 
 # 口语 → 术语映射。这是「词汇鸿沟」的最小成本解。
 # 实测案例：「满减和折扣券能一起用吗」在原始 query 下，正解「叠加规则」
@@ -85,7 +86,7 @@ def _path_bonus(query: str, section_path: str) -> float:
     return min(overlap, 6) * 0.0015
 
 
-def hybrid_search(store: Store, embedder, query: str, *, top_k: int = 5,
+def hybrid_search(store: PgStore, embedder, query: str, *, top_k: int = 5,
                   vector_k: int = 20, bm25_k: int = 20, rrf_k: int = 60,
                   vector_weight: float | None = None) -> list[Hit]:
     q_expanded = expand_query(query)
@@ -107,7 +108,7 @@ def hybrid_search(store: Store, embedder, query: str, *, top_k: int = 5,
     return fused[:top_k]
 
 
-def debug_search(store: Store, embedder, query: str, k: int = 5) -> dict:
+def debug_search(store: PgStore, embedder, query: str, k: int = 5) -> dict:
     """诊断用：分别看两路召回，定位是哪一路把正确结果丢了。"""
     q_expanded = expand_query(query)
     qv = embedder.embed_one(q_expanded)

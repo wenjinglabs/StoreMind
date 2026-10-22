@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .rag.pg_store import PgStore
 from .config import settings
 from .rag.chunker import split_markdown
-from .rag.store import Store
 
 
-def ingest_dir(store: Store, embedder, corpus_dir: Path) -> dict:
+def ingest_dir(store: PgStore, embedder, corpus_dir: Path) -> dict:
     base = Path(corpus_dir)
     if not base.is_absolute():
         base = settings.corpus_dir.parent / base

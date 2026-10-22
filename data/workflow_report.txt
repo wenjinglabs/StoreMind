@@ -1,10 +1,10 @@
-工作流测试 · 2026-10-22T20:31:23
+工作流测试 · 2026-10-22T21:14:38
 
-[PASS] 提案：状态 / 所需角色 / 风险 · ticket=ACT-20261022-A7024A restock=ACT-20261022-CD1B3D
-[PASS] 确认客诉工单 + 落库 + 审计 · ticket_id=T-20261022-EA0703 audit=['proposed', 'confirmed']
+[PASS] 提案：状态 / 所需角色 / 风险 · ticket=ACT-20261022-F63906 restock=ACT-20261022-1A186C
+[PASS] 确认客诉工单 + 落库 + 审计 · ticket_id=T-20261022-F6B631 audit=['proposed', 'confirmed']
 [PASS] 确认幂等 · 重复确认未重复建单
 [PASS] 越权拒绝 · 店员越权被拒，状态仍 pending，有审计
-[PASS] 店长确认补货 + 落库 · request_id=R-20261022-9B1D9B qty=20
+[PASS] 店长确认补货 + 落库 · request_id=R-20261022-863DFE qty=20
 [PASS] 提案幂等键 · 同 key 返回同一提案
 [PASS] 拒绝提案 + 审计 · events=['proposed', 'rejected']
 [PASS] 参数校验 · qty=0 被拒
