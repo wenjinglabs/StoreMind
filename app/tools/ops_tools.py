@@ -134,3 +134,13 @@ class OpsTools:
             "redemption_stats": "查某门店活动核销统计，参数 store_name, period",
             "inventory_alert": "查某门店低库存品项，参数 store_name, threshold",
         }
+
+
+def build_ops_tools(settings):
+    """按配置选经营数据后端。接口与 OpsTools 一致。"""
+    backend = (getattr(settings, "ops_backend", "sqlite") or "sqlite").lower()
+    if backend == "postgres":
+        from .pg_ops import PgOpsTools
+
+        return PgOpsTools(settings.pg_dsn)
+    return OpsTools(settings.data_dir / "ops.sqlite3")

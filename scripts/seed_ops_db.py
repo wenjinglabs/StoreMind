@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import random
 import sqlite3
 import sys
@@ -85,15 +86,55 @@ CREATE INDEX idx_orders_date ON orders(biz_date);
 CREATE INDEX idx_orders_store ON orders(store_id);
 """
 
+# PostgreSQL 方言：自增主键和 REAL 需要换掉。生成逻辑和 SQLite 完全共用，
+# 保证两个后端的经营数据逐行一致——这是迁移对照实验的前提。
+PG_SCHEMA = SCHEMA.replace(
+    "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY"
+).replace(" REAL NOT NULL", " DOUBLE PRECISION NOT NULL")
 
-def main(days: int = 60, seed: int = 42) -> None:
+
+class PgSeedConn:
+    """把 seed 脚本里的 ? 占位符转成 psycopg 的 %s，生成逻辑一行不用改。"""
+
+    def __init__(self, dsn: str) -> None:
+        import psycopg
+
+        self.conn = psycopg.connect(dsn)
+
+    def executescript(self, script: str) -> None:
+        with self.conn.cursor() as cur:
+            for stmt in script.split(";"):
+                if stmt.strip():
+                    cur.execute(stmt)
+
+    def execute(self, sql: str, params=()):
+        return self.conn.execute(sql.replace("?", "%s"), params)
+
+    def executemany(self, sql: str, rows) -> None:
+        with self.conn.cursor() as cur:
+            cur.executemany(sql.replace("?", "%s"), rows)
+
+    def commit(self) -> None:
+        self.conn.commit()
+
+    def close(self) -> None:
+        self.conn.close()
+
+
+def main(days: int = 60, seed: int = 42, backend: str = "", dsn: str = "") -> None:
     rnd = random.Random(seed)
-    settings.ensure_dirs()
-    if DB.exists():
-        DB.unlink()
+    backend = (backend or settings.ops_backend or "sqlite").lower()
+    if backend == "postgres":
+        conn = PgSeedConn(dsn or settings.pg_dsn)
+        schema = PG_SCHEMA
+    else:
+        settings.ensure_dirs()
+        if DB.exists():
+            DB.unlink()
+        conn = sqlite3.connect(DB)
+        schema = SCHEMA
 
-    conn = sqlite3.connect(DB)
-    conn.executescript(SCHEMA)
+    conn.executescript(schema)
     conn.executemany("INSERT INTO stores VALUES(?,?,?)", STORES)
 
     today = date.today()
@@ -159,9 +200,16 @@ def main(days: int = 60, seed: int = 42) -> None:
     conn.commit()
     conn.close()
 
-    print(f"ops db 生成完成: {DB}")
+    target = "postgres" if backend == "postgres" else DB
+    print(f"ops db 生成完成: {target}")
     print(f"  门店 {len(STORES)} 家，订单 {total_orders} 单，明细 {total_items} 行，覆盖 {days} 天")
 
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--backend", default="", choices=["", "sqlite", "postgres"])
+    ap.add_argument("--dsn", default="")
+    ap.add_argument("--days", type=int, default=60)
+    ap.add_argument("--seed", type=int, default=42)
+    args = ap.parse_args()
+    main(days=args.days, seed=args.seed, backend=args.backend, dsn=args.dsn)

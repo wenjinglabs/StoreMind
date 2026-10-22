@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
 from app.config import settings  # noqa: E402
 from app.ingest import ingest_dir  # noqa: E402
 from app.rag.embedder import build_embedder  # noqa: E402
-from app.rag.store import Store  # noqa: E402
+from app.rag.store import build_store  # noqa: E402
 
 
 def main() -> None:
@@ -35,10 +35,10 @@ def main() -> None:
         lines.append(s)
 
     settings.ensure_dirs()
-    store = Store(settings.db_path)
+    store = build_store(settings)
     if args.rebuild:
         store.reset()
-        store = Store(settings.db_path)
+        store = build_store(settings)
 
     embedder = build_embedder(
         settings.embed_backend, ollama_base=settings.ollama_base, model=settings.embed_model
@@ -54,7 +54,7 @@ def main() -> None:
     if prev_sig and prev_sig != cur_sig and not args.rebuild:
         force_rebuild = True
         store.reset()
-        store = Store(settings.db_path)
+        store = build_store(settings)
 
     corpus = Path(args.corpus)
     if not corpus.is_absolute():
@@ -67,6 +67,7 @@ def main() -> None:
         emit(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         emit(f"corpus      : {result['corpus_dir']}")
+        emit(f"storage     : {settings.db_backend} (dim={settings.embed_dim})")
         emit(f"embedder    : {embedder.name} (dim={embedder.dim})")
         if force_rebuild:
             emit(f"!! 嵌入器已变更 ({prev_sig} -> {cur_sig})，已强制重建索引")

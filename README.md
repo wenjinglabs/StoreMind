@@ -74,7 +74,9 @@ python scripts/verify_docker.py      # 部署验证 8/8
 ```
 
 默认是零依赖模式（`hashing + none`）：镜像自带 8 篇语料，启动时自动建经营库和索引，
-不需要 GPU、不需要宿主机 ollama。要接宿主机上的 ollama（答案质量更好）：
+不需要 GPU、不需要宿主机 ollama。**存储默认 PostgreSQL + pgvector**（compose 会起 postgres
+服务并等它健康）；想退回纯 SQLite，设 `SM_DB_BACKEND=sqlite SM_OPS_BACKEND=sqlite`。
+要接宿主机上的 ollama（答案质量更好）：
 
 ```powershell
 # PowerShell
@@ -93,14 +95,14 @@ SM_EMBED_BACKEND=ollama SM_LLM_BACKEND=ollama \
 
 | 配置 | /health | 规则题 | 数据题 | MCP |
 |---|---|---|---|---|
-| hashing + none | docs=8 chunks=45 | 引用 5 段，抽取式 477 字 | `store_sales` revenue=51115.0 | 8/8 |
-| ollama + qwen2.5:7b | docs=8 chunks=45 | 引用 5 段，生成 63 字，首次 6.1s | `store_sales` revenue=51115.0 | 8/8 |
+| hashing + none（PG） | db=postgres docs=8 chunks=45 | 引用 5 段，抽取式 477 字 | `store_sales` revenue=51115.0 | 8/8 |
+| ollama + qwen2.5:7b（PG） | db=postgres docs=8 chunks=45 | 引用 5 段，生成 79 字，首次 0.98s | `store_sales` revenue=51115.0 | 8/8 |
 
 两个实现细节：
 
 - 容器数据用命名卷 `deploy_storemind-data`，不挂宿主机 `data/`——本地开发用 bge-m3 索引，
   容器默认 hashing，混用会互相覆盖嵌入器签名（见第 8 条设计决策）。
-- `mcp` 服务等 `app` 健康后再启动，避免两个进程同时初始化 SQLite。
+- `mcp` 服务等 `app` 健康后再启动，避免两个进程同时初始化数据库。
 
 > Docker Desktop 需要 WSL2，且 `bcdedit` 的 `hypervisorlaunchtype` 必须是 `auto`。
 > 本机安装时踩过 `no virtualization available`，记录在 HANDOVER 6.11。
@@ -327,6 +329,10 @@ A/B 实验就是这么做的。
 **端到端真实验证**（`scripts/verify_e2e.py`，走 HTTP 打真模型，11 条用例）：11/11 无思考过程泄漏，10/11 章节命中。
 **答案稳定性**（`scripts/probe_stability.py`，同一问题连跑 5 次）：关键内容 5/5 稳定。
 
+**PostgreSQL 后端复跑**：87.5% / 95.8% / 95.8%。与 SQLite 的 83.3% 差异来自自检重查的
+模型判定波动（同一份索引重复跑也会变），**不是后端差异**；后端一致性以 parity 的
+top1 24/24、召回集合 24/24、工具 5/5 为准。
+
 ### 关于向量权重的对照实验
 
 `scripts/weight_sweep.py` 扫 8 档权重，用同一份金标集量：
@@ -390,11 +396,25 @@ qwen2.5:7b 答的是 300 元。系统提示词里第 3 条「涉及金额必须�
 
 **踩过的坑**：第一版 overlap 是直接截上一块最后 60 个字符贴到下一块开头，结果每个 chunk 开头都是半句话，生成时模型读到错位的上文。改成按完整句子从后往前取，且只在同一章节内做 overlap。
 
-### 2. 为什么用 pgvector 而不是独立向量库
+### 2. 为什么用 pgvector，而不是独立向量库 / 纯 SQLite
 
-业务数据本来就在 PostgreSQL，向量放同一个库能做 JOIN、能走事务、备份一套搞定。这个项目的规模（几万 chunk 以内）暴力余弦是毫秒级，引入 Qdrant / Milvus 只是多一个要运维的组件。
+**部署路径是 PostgreSQL + pgvector**：知识库向量和经营数据在同一个库，能做 JOIN、走事务、备份一套搞定；比 Qdrant / Milvus 少一个要运维的组件。
 
-当前实现用 SQLite + 内存暴力检索，`deploy/pgvector_init.sql` 是迁移路径。**这是权衡不是偷懒**：单机 100 万级向量 pgvector 完全够用，收益不成比例的事不做。
+**SQLite 没有删，作为零依赖 / CI 后端保留**：clone 下来不装 PostgreSQL、不拉模型也能跑通（`SM_DB_BACKEND=sqlite` + hashing + none）。两个后端接口一致，上层 Pipeline / Agent / MCP 不需要知道用的是哪个。
+
+**迁移不是口头承诺**：`scripts/parity_backends.py` 用同一语料、同一 bge-m3 嵌入分别建 SQLite 和 PG 索引，对照结果：
+
+| 项 | 结果 |
+|---|---|
+| 索引规模 docs / chunks / terms | 8 / 45 / 3664，两边一致 |
+| 24 条规则题 top1 | 24/24 一致 |
+| 24 条规则题 top5 召回集合 | 24/24 一致 |
+| 5 个经营数据工具输出 | 5/5 逐行一致 |
+| 单次 hybrid_search（含嵌入） | SQLite 16.3ms · PG 59.5ms |
+
+最后一行是真实的：**45 个 chunk 的规模上 PG 更慢**，多出来的主要是网络往返和 HNSW 的固定开销。迁移的收益在并发、多实例和 10 万 chunk 以上的 ANN 场景，不是单机小数据。这个结论本身比「PG 更快」更值得讲。
+
+BM25 仍留在应用层（`chunk_terms` 表 + Python 打分），没有换成 PG 的 `tsvector`：换成 TF-IDF 类实现会改变词法召回，迁移前后的指标就不可比了。中文全文检索的生产方案是 zhparser / pg_jieba。
 
 ### 3. 为什么要混合检索，以及一个反直觉的发现
 
@@ -550,10 +570,12 @@ app/
   rag/
     chunker.py         标题层级语义切分
     embedder.py        嵌入层（hashing / ollama）
-    store.py           SQLite + 自实现 BM25 + 暴力余弦
+    store.py           SQLite 实现（零依赖路径）+ 自实现 BM25
+    pg_store.py        PostgreSQL + pgvector（HNSW），接口与 store.py 一致
     retriever.py       混合召回 + 加权 RRF + 路径加权重排
   tools/
-    ops_tools.py       白名单结构化查询工具
+    ops_tools.py       白名单结构化查询工具（SQLite）
+    pg_ops.py          同一组工具（PostgreSQL）
   mcp/
     server.py          自实现 MCP server（JSON-RPC 2.0 + tools/resources + stdio/HTTP）
   static/
@@ -580,11 +602,12 @@ scripts/
   mcp_server.py        MCP server 启动入口（不依赖 cwd）
   mcp_smoke_test.py    MCP 协议冒烟：握手 / 通知 / 工具 / 资源 / 三类错误码
   verify_docker.py     Docker 部署验证：app 三个接口 + MCP 四个方法
+  parity_backends.py   SQLite ↔ PostgreSQL 迁移对照：索引 / 召回 / 工具输出
   dump_prompt.py       导出真实 prompt 排查
   dump_chunks.py       导出语料切片结果，定位某句话落在哪一段
   dump_judge.py        导出 judge 模型的原始输出，查解析失败
   setup_local.bat      一键起 ollama + 拉模型 + 建索引
-deploy/                docker-compose 与 pgvector schema
+deploy/                docker-compose（PG + app + MCP）与 pgvector schema
 mcp.example.json       MCP 客户端配置示例
 ```
 
@@ -602,6 +625,8 @@ mcp.example.json       MCP 客户端配置示例
       stdio / HTTP 两种传输，协议冒烟 12/12（含零依赖模式）
 - [x] **Docker 化**：零依赖默认配置，`docker compose up` 同时起 app 和 MCP；
       镜像 305MB，部署验证 8/8（hashing + none / ollama 各测一次）
+- [x] **PostgreSQL + pgvector 迁移**：HNSW 索引，知识库与经营数据同库；
+      SQLite 保留为零依赖后端，迁移对照 4/4（top1 24/24、召回集合 24/24、工具 5/5）
 - [ ] Redis 语义缓存：query embedding 相似度 > 0.95 直接返回
 - [ ] 加 rerank 模型（bge-reranker），解决 top1 排序不理想这个最大短板
 - [ ] LLM 版指代消解：当前「那退卡呢」靠规则借上文，复杂追问会失效

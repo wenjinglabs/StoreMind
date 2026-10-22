@@ -51,15 +51,23 @@ python scripts/mcp_server.py --http 8765    # HTTP 传输，便于 curl / 容器
 python scripts/mcp_smoke_test.py            # 协议冒烟，12/12
 ```
 
-**Docker（app + MCP 同时起）**：
+**Docker（postgres + app + MCP 一起起）**：
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d --build
 python scripts/verify_docker.py             # 部署验证，8/8
 ```
 
-默认零依赖（hashing + none）；接宿主机 ollama 时在 compose 前设
-`SM_EMBED_BACKEND=ollama` / `SM_LLM_BACKEND=ollama`，见 README「方式三」。
+默认 PG（pgvector）+ hashing + none；SQLite 仍是零依赖/CI 后端：
+`SM_DB_BACKEND=sqlite SM_OPS_BACKEND=sqlite`。接宿主机 ollama 时在 compose 前设
+`SM_EMBED_BACKEND=ollama SM_LLM_BACKEND=ollama SM_EMBED_DIM=1024`，见 README「方式三」。
+
+**SQLite ↔ PG 迁移对照**（简历上那条数据的来源）：
+
+```bash
+SM_PG_DSN=postgresql://storemind:storemind@127.0.0.1:5433/storemind \
+  python scripts/parity_backends.py
+```
 
 **打开 `http://127.0.0.1:8121/` 是可以直接对话的网页**，
 `/docs` 是 FastAPI 自动生成的接口文档。
@@ -87,7 +95,11 @@ python scripts/mcp_smoke_test.py          # MCP 协议冒烟，12 项；加 --ze
 | 冒烟 | 5/5 |
 | 端到端 | 11/11 无思考泄漏 |
 | MCP 协议冒烟 | 12/12（含零依赖模式） |
-| Docker 部署验证 | 8/8（hashing + none 与 ollama 各一次） |
+| Docker 部署验证 | 8/8（hashing + none 与 ollama 各一次，PG 后端） |
+| SQLite ↔ PG 迁移对照 | 4/4（top1 24/24、召回集合 24/24、工具 5/5） |
+
+> PG 后端复跑金标集是 87.5%（SQLite 83.3%）。差异来自自检重查的模型判定波动，
+> 不是后端差异——同一份索引重复跑也会变。后端一致性看 parity 的 24/24，不看这个。
 
 ---
 
@@ -102,6 +114,7 @@ python scripts/mcp_smoke_test.py          # MCP 协议冒烟，12 项；加 --ze
 | qwen3:4b | 2.5GB | 已 pull（**不要用它生成**，见第 6 节） |
 | GPU | RTX 5060 8GB | 架构 sm_120，ollama 官方支持 |
 | Docker | 29.9.2 / Desktop 4.96.1 | WSL2 后端，`hypervisorlaunchtype=Auto` |
+| PostgreSQL | 17 + pgvector | 容器 `pgvector/pgvector:pg17`，宿主端口 5433 |
 
 关键包：fastapi 0.159.1 / uvicorn 0.54.0 / pydantic 2.14.1 / httpx 0.28.1 /
 langgraph 1.2.16 / langgraph-checkpoint-sqlite 3.1.2
@@ -136,6 +149,8 @@ langgraph 1.2.16 / langgraph-checkpoint-sqlite 3.1.2
 | `app/agent/router.py` | 意图路由（纯正则，强/弱信号分层） | 112 |
 | `app/agent/llm.py` | 生成层（none / ollama / openai 兼容） | 130 |
 | `app/rag/*` | chunker / embedder / store（自实现 BM25）/ retriever | ~740 |
+| `app/rag/pg_store.py` | PostgreSQL + pgvector（HNSW），与 SQLite 接口一致 | ~340 |
+| `app/tools/pg_ops.py` | 经营数据工具的 PG 实现 | ~110 |
 | `app/tools/ops_tools.py` | 白名单结构化查询工具 | 136 |
 | `app/mcp/server.py` | 自实现 MCP server（JSON-RPC 2.0，stdio + HTTP） | ~500 |
 | `app/static/index.html` | 单文件前端，零构建 | ~530 |
@@ -289,6 +304,29 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 本地开发用 bge-m3 索引，容器默认 hashing，`build_index.py` 检测到签名变化会在共享目录里重建，
 两边的索引会互相覆盖。现在容器用命名卷 `deploy_storemind-data`。
 
+### 6.12 pgvector 的 HNSW 要求固定维度
+
+`vector` 不带维度时 `CREATE INDEX ... USING hnsw` 会直接报
+`column does not have dimensions`。现在 `PgStore` 按 `SM_EMBED_DIM` 建
+`vector(512)`（hashing）或 `vector(1024)`（bge-m3）；换嵌入后端时查
+`pg_attribute` 的实际列类型，不一致就 DROP `chunks` + `chunk_terms` 重建。
+**别把维度写死成 1024**——零依赖 hashing 模式会插不进去。
+
+### 6.13 别让 init SQL 抢运行时 schema
+
+之前 compose 把 `pgvector_init.sql` 挂到 `/docker-entrypoint-initdb.d`，
+它先把 `docs.updated_at` 建成 `TIMESTAMPTZ`、`chunks` 建成 `vector(1024)`。
+`PgStore` 的 `CREATE TABLE IF NOT EXISTS` 不会修改已有列，结果是
+`stats.updated_at` 变成 datetime、维度检测也只能处理 `chunks`。
+现在挂载已移除，运行时 schema 只由 `PgStore` 创建，`pgvector_init.sql` 只是参考。
+
+### 6.14 PG 在 45 个 chunk 上比 SQLite 慢是正常的
+
+实测单次 `hybrid_search`（含 bge-m3 嵌入）：SQLite 16.3ms，PG 59.5ms。
+多出来的是网络往返和 HNSW 的固定开销。迁移的收益在并发、多实例和
+10 万 chunk 以上的 ANN 场景，不在单机小数据。面试别说成“性能提升”，
+说“双后端输出可验证一致，并为规模留了迁移路径”。
+
 ---
 
 ## 7. 接下来做什么
@@ -298,7 +336,8 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 | 优先 | 事项 | 为什么 | 预估 |
 |---|---|---|---|
 | **P0** | **MCP server（自己写协议实现）** | ✅ 2026-10-22 已完成：8 个工具 + 语料资源，stdio/HTTP，协议冒烟 12/12 | 半天 |
-| **P0** | **Docker 化 + 部署 + 录 3 分钟屏** | ✅ 2026-10-22 Docker 部分完成：零依赖默认 + MCP 服务，部署验证 8/8；**录屏还没做** | 1 天 |
+| **P0** | **Docker 化 + 部署 + 录 3 分钟屏** | ✅ 2026-10-22 Docker 部分完成：PG + app + MCP，部署验证 8/8；**录屏还没做** | 1 天 |
+| **P1** | **PostgreSQL + pgvector 迁移** | ✅ 2026-10-22 已完成：HNSW、双后端 parity 4/4；PG 45 chunk 延迟 59.5ms vs SQLite 16.3ms（别宣传成性能提升） | 半天 |
 | **P0** | **改简历** | **10.27 死线**，代码再好简历上只有一行字也白搭 | 半天 |
 | P1 | 两篇博客（切片对照实验 / 评估集怎么建） | 加分项第 5 条，成本极低 | 1 天 |
 | P1 | 语料扩到 20 篇 + 切片对照实验 | 现有 45 个 chunk 太小，混合检索的两路互补性体现不出来 | 1 天 |
@@ -345,6 +384,15 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 4. 为什么先手写状态机再迁 LangGraph（同一套逻辑两种编排，6/6 等价）
 5. 防幻觉的四道防线 + Agent 层的自检重查（A/B 对照 +8.3 recall@1）
 6. 为什么自己实现 MCP 协议而不是调 SDK（握手 / 能力协商 / 通知无响应 / 错误码语义）
+7. 为什么最终上 PostgreSQL + pgvector，同时保留 SQLite（迁移对照 4/4，PG 小数据更慢）
+
+**PG 这条怎么讲**：
+
+> 部署用 PostgreSQL + pgvector，向量和经营数据同库，HNSW 索引；SQLite 保留成
+> 零依赖/CI 后端，clone 下来不装数据库也能跑。我用同一份语料做了双后端对照：
+> 索引规模、24 条规则题 top1、top5 召回集合、5 个经营工具输出全部一致。
+> 45 个 chunk 上 PG 反而慢（59.5ms vs 16.3ms），因为多了网络往返和 HNSW 开销；
+> 迁移的收益是并发和 10 万 chunk 以上的 ANN，不是单机小数据。
 
 **MCP 这条怎么讲**（JD 硬指标，别只说「我接入了 MCP」）：
 
@@ -383,6 +431,10 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 - ❌ 别删 `scripts/mcp_smoke_test.py` 和 `data/mcp_report*.txt`——MCP 是自己写的协议，
       这两份报告是「协议实现正确」的唯一证据
 - ❌ 别删 `scripts/verify_docker.py` 和 `data/docker_verify*.txt`——Docker 部署的唯一实测证据
+- ❌ 别删 `app/rag/pg_store.py` / `app/tools/pg_ops.py` / `scripts/parity_backends.py` /
+      `data/parity_report.txt`——PG 迁移和双后端一致性的证据
+- ❌ 别把 `pgvector_init.sql` 重新挂到 `/docker-entrypoint-initdb.d`——会和 PgStore 抢 schema，见 6.13
+- ❌ 别把 `SM_EMBED_DIM` 写死成 1024——hashing 零依赖模式要 512，见 6.12
 - ❌ 别把容器数据挂回宿主机 `data/`——索引签名会互相覆盖，见 6.11
 - ❌ 别擅自删文件、删字段、删测试数据
 

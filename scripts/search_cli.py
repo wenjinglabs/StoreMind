@@ -21,8 +21,8 @@ from app.agent.llm import build_llm  # noqa: E402
 from app.agent.pipeline import Pipeline  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.rag.embedder import build_embedder  # noqa: E402
-from app.rag.store import Store  # noqa: E402
-from app.tools.ops_tools import OpsTools  # noqa: E402
+from app.rag.store import build_store  # noqa: E402
+from app.tools.ops_tools import build_ops_tools  # noqa: E402
 
 DEMO_QUERIES = [
     "会员卡能跨店用吗",
@@ -81,7 +81,7 @@ def main() -> None:
 
 def _run(args) -> None:
     settings.ensure_dirs()
-    store = Store(settings.db_path)
+    store = build_store(settings)
     stats = store.stats()
     if stats["chunks"] == 0:
         print("索引为空，先跑 python scripts/build_index.py --rebuild")
@@ -98,7 +98,7 @@ def _run(args) -> None:
         base=settings.openai_base,
         key=settings.openai_key,
     )
-    tools = OpsTools(settings.data_dir / "ops.sqlite3")
+    tools = build_ops_tools(settings)
     pipe = Pipeline(store, embedder, llm, tools, settings)
 
     queries = DEMO_QUERIES if args.batch else ([args.query] if args.query else DEMO_QUERIES)

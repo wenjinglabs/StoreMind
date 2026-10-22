@@ -12,7 +12,11 @@ services:
     ports:
       - "8000:8000"
     environment: &app-env
+      SM_DB_BACKEND: ${SM_DB_BACKEND:-postgres}
+      SM_OPS_BACKEND: ${SM_OPS_BACKEND:-postgres}
+      SM_PG_DSN: ${SM_PG_DSN:-postgresql://storemind:storemind@postgres:5432/storemind}
       SM_EMBED_BACKEND: ${SM_EMBED_BACKEND:-hashing}
+      SM_EMBED_DIM: ${SM_EMBED_DIM:-512}
       SM_EMBED_MODEL: ${SM_EMBED_MODEL:-bge-m3}
       SM_LLM_BACKEND: ${SM_LLM_BACKEND:-none}
       SM_LLM_MODEL: ${SM_LLM_MODEL:-qwen2.5:7b}
@@ -24,10 +28,13 @@ services:
     volumes:
       - storemind-data:/app/data
       - ../corpus:/app/corpus:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   # 同一个镜像，换个入口：MCP server 走 HTTP，供任意 MCP 客户端或 curl 调用。
-  # 等 app 建完索引再起，避免两个进程同时初始化 SQLite。
+  # 等 app 建完索引再起，避免两个进程同时初始化数据库。
   mcp:
     image: storemind:local
     container_name: storemind-mcp
@@ -51,11 +58,11 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # 迁移用，不参与当前版本运行。启动：docker compose --profile pg up -d
+  # pgvector：知识库向量和经营数据都在这里。
+  # 不再用 profile：docker compose up 就是完整部署，不需要额外记参数。
   postgres:
     image: pgvector/pgvector:pg17
     container_name: storemind-pg
-    profiles: ["pg"]
     environment:
       POSTGRES_USER: storemind
       POSTGRES_PASSWORD: storemind
@@ -64,7 +71,11 @@ services:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./pgvector_init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U storemind -d storemind"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
 volumes:

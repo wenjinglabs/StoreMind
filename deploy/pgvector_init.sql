@@ -1,14 +1,12 @@
--- StoreMind pgvector 迁移 schema
+-- StoreMind PostgreSQL + pgvector 参考 schema
 --
--- 当前代码跑在 SQLite 上（chunk 存 float32 blob，检索在 Python 侧算余弦）。
--- 这份 schema 是迁移目标：向量进库、检索下推给 PG、能跟业务表 JOIN。
+-- 运行时 schema 由 app/rag/pg_store.py 创建，维度取自 SM_EMBED_DIM
+-- （hashing 512 / bge-m3 1024）。这个文件用于展示生产目标，不是启动依赖：
+-- docker-compose 不再把它挂到 /docker-entrypoint-initdb.d。
 --
--- 迁移触发条件：chunk 数过 10 万，或需要「向量检索 + 业务条件过滤」同时做的时候。
--- 在那之前上 PG 只是多一个要运维的组件。
---
--- 用法：
---   docker compose -f deploy/docker-compose.yml --profile pg up -d
---   psql -h 127.0.0.1 -U storemind -d storemind -f deploy/pgvector_init.sql
+-- 为什么 BM25 不在这里：项目保留了应用层的字符 bigram BM25（chunk_terms 表 +
+-- Python 打分），换成 PG 的 tsvector 会改变词法召回，迁移前后指标就不可比了。
+-- 中文全文检索的生产方案是 zhparser / pg_jieba，不是 simple 配置。
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -18,13 +16,14 @@ CREATE TABLE IF NOT EXISTS docs (
     source_path  TEXT NOT NULL,
     content_hash TEXT NOT NULL,
     chunk_count  INTEGER NOT NULL DEFAULT 0,
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at   TEXT NOT NULL
 );
 
--- bge-m3 输出 1024 维。换模型必须改这个维度并重建索引。
+-- bge-m3 输出 1024 维；hashing 是 512 维。
+-- HNSW 要求固定维度，所以换嵌入后端必须重建这张表（PgStore 会自动检测）。
 CREATE TABLE IF NOT EXISTS chunks (
     id           BIGSERIAL PRIMARY KEY,
-    doc_id       TEXT NOT NULL REFERENCES docs(doc_id) ON DELETE CASCADE,
+    doc_id       TEXT NOT NULL,
     doc_title    TEXT NOT NULL,
     section_path TEXT NOT NULL,
     chunk_index  INTEGER NOT NULL,
@@ -33,40 +32,34 @@ CREATE TABLE IF NOT EXISTS chunks (
     char_start   INTEGER NOT NULL,
     char_end     INTEGER NOT NULL,
     content_hash TEXT NOT NULL,
-    embedding    vector(1024) NOT NULL,
-    tsv          tsvector,
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    dim          INTEGER NOT NULL,
+    embedding    vector(1024) NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 
--- HNSW 比 IVFFlat 更适合「边写边查」的场景（IVFFlat 需要先有数据才能训练列表）
+-- HNSW 比 IVFFlat 更适合「边写边查」：IVFFlat 需要先有数据才能训练列表。
 CREATE INDEX IF NOT EXISTS idx_chunks_embedding
     ON chunks USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
 
-CREATE INDEX IF NOT EXISTS idx_chunks_tsv ON chunks USING gin (tsv);
+-- 应用层 BM25 的词表，和 SQLite 版同构。
+CREATE TABLE IF NOT EXISTS chunk_terms (
+    chunk_id BIGINT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    term     TEXT NOT NULL,
+    tf       INTEGER NOT NULL,
+    PRIMARY KEY (chunk_id, term)
+);
+CREATE INDEX IF NOT EXISTS idx_terms_term ON chunk_terms(term);
 
--- 中文全文检索：PG 自带分词对中文不友好，生产建议装 zhparser 或 pg_jieba。
--- 这里先用 simple 配置兜底，配合应用侧的字符 bigram 分词写入 tsv。
--- 若要开箱可用，把下面这行替换成：
---   CREATE TEXT SEARCH CONFIGURATION zh (COPY = simple);
-CREATE OR REPLACE FUNCTION chunks_tsv_trigger() RETURNS trigger AS $$
-BEGIN
-    NEW.tsv := to_tsvector('simple', NEW.embed_text);
-    RETURN NEW;
-END
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS trg_chunks_tsv ON chunks;
-CREATE TRIGGER trg_chunks_tsv
-    BEFORE INSERT OR UPDATE ON chunks
-    FOR EACH ROW EXECUTE FUNCTION chunks_tsv_trigger();
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 
 -- 检索示例：向量召回 top 20
 --   SELECT id, section_path, 1 - (embedding <=> $1) AS score
---   FROM chunks ORDER BY embedding <=> $1 LIMIT 20;
+--   FROM chunks WHERE dim = 1024 ORDER BY embedding <=> $1 LIMIT 20;
 --
--- 混合检索（向量 + 关键词）在应用层用 RRF 融合两路结果，
--- 不在这里写 SQL，因为 RRF 的 k 值和权重需要跟着评估集调，
--- 放进数据库就改不动了。
+-- 混合检索（向量 + BM25）在应用层用 RRF 融合两路结果，
+-- 不在这里写 SQL，因为 RRF 的 k 值和权重需要跟着评估集调。

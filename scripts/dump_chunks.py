@@ -15,10 +15,10 @@ if str(ROOT) not in sys.path:
 
 from app.config import settings
 from app.rag.chunker import split_markdown
-from app.rag.store import Store
+from app.rag.store import build_store
 
 settings.ensure_dirs()
-store = Store(settings.db_path)
+store = build_store(settings)
 
 md = ROOT / "corpus" / "sop" / "03-客诉处理手册.md"
 raw = md.read_text(encoding="utf-8")

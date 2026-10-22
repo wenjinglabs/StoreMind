@@ -299,3 +299,18 @@ class Store:
                 (doc_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+
+def build_store(settings):
+    """按配置选存储后端。
+
+    sqlite 是零依赖/CI 路径；postgres 是部署路径（pgvector + HNSW）。
+    两个实现接口一致，上层 Pipeline / Agent / MCP 不需要知道用的是哪个。
+    """
+    backend = (getattr(settings, "db_backend", "sqlite") or "sqlite").lower()
+    if backend == "postgres":
+        from .pg_store import PgStore
+
+        return PgStore(settings.pg_dsn, dim=settings.embed_dim)
+    return Store(settings.db_path)
+

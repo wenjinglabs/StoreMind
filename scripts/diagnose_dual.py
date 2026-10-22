@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 from app.config import settings  # noqa: E402
 from app.rag.embedder import build_embedder  # noqa: E402
 from app.rag.retriever import expand_query, rrf_fuse, _path_bonus  # noqa: E402
-from app.rag.store import Store  # noqa: E402
+from app.rag.store import build_store  # noqa: E402
 
 
 def main() -> None:
@@ -29,7 +29,7 @@ def main() -> None:
     args = ap.parse_args()
 
     settings.ensure_dirs()
-    store = Store(settings.db_path)
+    store = build_store(settings)
     embedder = build_embedder(
         settings.embed_backend, ollama_base=settings.ollama_base, model=settings.embed_model
     )

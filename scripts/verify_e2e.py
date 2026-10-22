@@ -49,7 +49,9 @@ def main() -> None:
     thread = "verify-1"
     with httpx.Client(timeout=180.0) as c:
         h = c.get(f"{BASE}/health").json()
-        out.append(f"health: embed={h['embed_backend']} llm={h['llm_backend']} engine={h['engine']} chunks={h['stats']['chunks']}")
+        out.append(f"health: embed={h['embed_backend']} llm={h['llm_backend']} "
+                   f"db={h.get('db_backend')}/{h.get('ops_backend')} engine={h['engine']} "
+                   f"chunks={h['stats']['chunks']}")
         out.append("")
 
         for kind, q, expect in CASES:

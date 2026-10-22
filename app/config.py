@@ -38,6 +38,15 @@ class Settings:
     data_dir: Path = field(default_factory=lambda: ROOT / "data")
     corpus_dir: Path = field(default_factory=lambda: ROOT / "corpus")
 
+    # 存储后端: sqlite | postgres
+    # sqlite 是零依赖/CI 路径（clone 下来不装数据库也能跑）；
+    # postgres 是部署路径（pgvector + HNSW），Docker compose 默认用它。
+    db_backend: str = field(default_factory=lambda: _env("SM_DB_BACKEND", "sqlite"))
+    pg_dsn: str = field(default_factory=lambda: _env(
+        "SM_PG_DSN", "postgresql://storemind:storemind@127.0.0.1:5433/storemind"
+    ))
+    ops_backend: str = field(default_factory=lambda: _env("SM_OPS_BACKEND", "sqlite"))
+
     # 嵌入后端: hashing | ollama
     # hashing 零依赖，用于无网络/未拉模型时跑通链路；ollama 是正式路径
     embed_backend: str = field(default_factory=lambda: _env("SM_EMBED_BACKEND", "hashing"))
@@ -80,6 +89,16 @@ class Settings:
     @property
     def db_path(self) -> Path:
         return self.data_dir / "storemind.sqlite3"
+
+    @property
+    def embed_dim(self) -> int:
+        """pgvector 的列维度必须固定，HNSW 才能建索引。
+
+        hashing 固定 512；bge-m3 是 1024。换嵌入后端时 PgStore 会检测维度
+        并重建 chunks 表（索引也一起重建）。
+        """
+        default = "512" if self.embed_backend.lower() == "hashing" else "1024"
+        return int(_env("SM_EMBED_DIM", default))
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

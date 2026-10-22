@@ -1,0 +1,11 @@
+SQLite ↔ PostgreSQL 迁移对照 · 2026-10-22T12:45:40
+embedder=ollama dim=1024 corpus=<项目路径>\corpus
+
+[PASS] 索引规模 · sqlite={'docs': 8, 'chunks': 45, 'terms': 3664, 'updated_at': '2026-10-22T04:45:32+00:00'} · pg={'docs': 8, 'chunks': 45, 'terms': 3664, 'updated_at': '2026-10-22T04:45:36+00:00'}
+[PASS] 规则题 top1 一致 · 24/24
+[PASS] 规则题召回集合一致 · 24/24
+[PASS] 经营工具输出一致 · 5/5
+
+单次 hybrid_search 平均延迟（10 次，含嵌入）：sqlite=16.3ms · pg=59.5ms
+
+结果 4/4

@@ -28,8 +28,8 @@ from app.agent.llm import build_llm  # noqa: E402
 from app.agent.pipeline import Pipeline  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.rag.embedder import build_embedder  # noqa: E402
-from app.rag.store import Store  # noqa: E402
-from app.tools.ops_tools import OpsTools  # noqa: E402
+from app.rag.store import build_store  # noqa: E402
+from app.tools.ops_tools import build_ops_tools  # noqa: E402
 
 GOLDEN = ROOT / "eval" / "golden.json"
 REFUSE_HINTS = ("没有找到", "没有相关规定", "没有相关内容", "建议")
@@ -42,7 +42,7 @@ def main() -> None:
 
     cases = json.loads(GOLDEN.read_text(encoding="utf-8"))
     settings.ensure_dirs()
-    store = Store(settings.db_path)
+    store = build_store(settings)
     embedder = build_embedder(
         settings.embed_backend, ollama_base=settings.ollama_base, model=settings.embed_model
     )
@@ -53,7 +53,7 @@ def main() -> None:
         base=settings.openai_base,
         key=settings.openai_key,
     )
-    tools = OpsTools(settings.data_dir / "ops.sqlite3")
+    tools = build_ops_tools(settings)
     pipe = Pipeline(store, embedder, llm, tools, settings)
 
     rows: list[dict] = []

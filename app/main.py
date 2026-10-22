@@ -17,8 +17,8 @@ from .agent.llm import build_llm
 from .agent.pipeline import Pipeline
 from .config import settings
 from .rag.embedder import build_embedder
-from .rag.store import Store
-from .tools.ops_tools import OpsTools
+from .rag.store import build_store
+from .tools.ops_tools import build_ops_tools
 
 app = FastAPI(
     title="StoreMind · 门店运营知识库 Agent",
@@ -28,7 +28,7 @@ app = FastAPI(
 )
 
 settings.ensure_dirs()
-_store = Store(settings.db_path)
+_store = build_store(settings)
 _embedder = build_embedder(
     settings.embed_backend, ollama_base=settings.ollama_base, model=settings.embed_model
 )
@@ -42,7 +42,7 @@ _llm = build_llm(
     key=settings.openai_key,
     timeout=settings.llm_timeout,
 )
-_tools = OpsTools(settings.data_dir / "ops.sqlite3")
+_tools = build_ops_tools(settings)
 _pipeline = Pipeline(_store, _embedder, _llm, _tools, settings)
 _agent = GraphAgent(_store, _embedder, _llm, _tools, settings)
 
@@ -76,7 +76,9 @@ def health() -> dict:
         "embed_backend": _embedder.name,
         "llm_backend": _llm.name,
         "engine": "langgraph",
-        "db": str(settings.db_path),
+        "db_backend": settings.db_backend,
+        "ops_backend": settings.ops_backend,
+        "db": "postgres" if settings.db_backend == "postgres" else str(settings.db_path),
         "stats": _store.stats(),
     }
 

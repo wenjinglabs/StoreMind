@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
 from app.config import settings  # noqa: E402
 from app.rag.embedder import build_embedder  # noqa: E402
 from app.rag.retriever import debug_search  # noqa: E402
-from app.rag.store import Store  # noqa: E402
+from app.rag.store import build_store  # noqa: E402
 
 CASES = [
     "满减和折扣券能一起用吗",
@@ -36,7 +36,7 @@ def main() -> None:
     args = ap.parse_args()
 
     settings.ensure_dirs()
-    store = Store(settings.db_path)
+    store = build_store(settings)
     embedder = build_embedder(
         settings.embed_backend, ollama_base=settings.ollama_base, model=settings.embed_model
     )

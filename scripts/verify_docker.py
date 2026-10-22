@@ -29,6 +29,8 @@ def main() -> int:
     ap.add_argument("--mcp", default="http://127.0.0.1:8765")
     ap.add_argument("--expect-embed", default="hashing", help="hashing | ollama")
     ap.add_argument("--expect-llm", default="none", help="none | ollama | openai")
+    ap.add_argument("--expect-db", default="postgres", help="sqlite | postgres")
+    ap.add_argument("--expect-ops", default="postgres", help="sqlite | postgres")
     ap.add_argument("--out", default="data/docker_verify.txt")
     args = ap.parse_args()
 
@@ -53,8 +55,12 @@ def main() -> int:
         assert h["ok"] is True, h
         assert h["embed_backend"] == args.expect_embed, h
         assert h["llm_backend"] == args.expect_llm, h
+        assert h["db_backend"] == args.expect_db, h
+        assert h["ops_backend"] == args.expect_ops, h
         assert h["stats"]["docs"] == 8 and h["stats"]["chunks"] == 45, h["stats"]
-        return f"embed={h['embed_backend']} llm={h['llm_backend']} docs={h['stats']['docs']} chunks={h['stats']['chunks']}"
+        return (f"embed={h['embed_backend']} llm={h['llm_backend']} "
+                f"db={h['db_backend']}/{h['ops_backend']} "
+                f"docs={h['stats']['docs']} chunks={h['stats']['chunks']}")
 
     def t_chat_policy():
         d = c.post(f"{args.app}/chat", json={"query": "会员卡能跨店用吗", "thread_id": "docker-policy"}).json()
@@ -125,7 +131,8 @@ def main() -> int:
     lines = [
         f"Docker 部署验证 · {datetime.now().isoformat(timespec='seconds')}",
         f"app={args.app}  mcp={args.mcp}",
-        f"期望后端: embed={args.expect_embed} llm={args.expect_llm}",
+        f"期望后端: embed={args.expect_embed} llm={args.expect_llm} "
+        f"db={args.expect_db} ops={args.expect_ops}",
         "",
     ]
     for name, ok, detail in checks:

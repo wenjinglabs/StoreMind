@@ -1,4 +1,4 @@
-MCP smoke test · 2026-10-22T11:42:57
+MCP smoke test · 2026-10-22T12:58:37
 零依赖模式: 是 (hashing + none)
 协议: 2025-06-18 · 传输: stdio
 

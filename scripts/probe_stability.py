@@ -23,8 +23,8 @@ from app.agent.llm import build_llm
 from app.agent.pipeline import Pipeline
 from app.config import settings
 from app.rag.embedder import build_embedder
-from app.rag.store import Store
-from app.tools.ops_tools import OpsTools
+from app.rag.store import build_store
+from app.tools.ops_tools import build_ops_tools
 
 N = 5
 CASES = [
@@ -37,12 +37,12 @@ CASES = [
 
 def main() -> None:
     settings.ensure_dirs()
-    store = Store(settings.db_path)
+    store = build_store(settings)
     emb = build_embedder(settings.embed_backend, ollama_base=settings.ollama_base, model=settings.embed_model)
     llm = build_llm(settings.llm_backend, ollama_base=settings.ollama_base,
                     model=settings.llm_model, base=settings.openai_base,
                     key=settings.openai_key, timeout=settings.llm_timeout)
-    tools = OpsTools(settings.data_dir / "ops.sqlite3")
+    tools = build_ops_tools(settings)
     pipe = Pipeline(store, emb, llm, tools, settings)
 
     out: list[str] = []

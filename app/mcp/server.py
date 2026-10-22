@@ -29,8 +29,8 @@ from ..agent.llm import build_llm
 from ..config import Settings, settings
 from ..rag.embedder import build_embedder
 from ..rag.retriever import hybrid_search
-from ..rag.store import Store
-from ..tools.ops_tools import OpsTools, ToolResult
+from ..rag.store import build_store
+from ..tools.ops_tools import ToolResult, build_ops_tools
 
 SERVER_NAME = "storemind"
 SERVER_VERSION = "0.1.0"
@@ -96,11 +96,11 @@ class StoremindTools:
     def __init__(self, cfg: Settings | None = None) -> None:
         self.s = cfg or settings
         self.s.ensure_dirs()
-        self.store = Store(self.s.db_path)
+        self.store = build_store(self.s)
         self.embedder = build_embedder(
             self.s.embed_backend, ollama_base=self.s.ollama_base, model=self.s.embed_model
         )
-        self.tools = OpsTools(self.s.data_dir / "ops.sqlite3")
+        self.tools = build_ops_tools(self.s)
         self._agent: GraphAgent | None = None
 
     # Agent 延迟构建：只调 search_knowledge 的客户端不需要加载 LangGraph 和模型。

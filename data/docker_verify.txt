@@ -1,13 +1,14 @@
-Docker 部署验证 · 2026-10-22T12:04:09
+Docker 部署验证 · 2026-10-22T12:49:29
 app=http://127.0.0.1:8000  mcp=http://127.0.0.1:8765
+期望后端: embed=hashing llm=none db=postgres ops=postgres
 
-[PASS] app /health（零依赖配置） · embed=hashing llm=none docs=8 chunks=45 (5ms)
-[PASS] app /chat 规则题 · intent=policy 引用=5 答案=477字 (89ms)
-[PASS] app /chat 数据题 · tool=store_sales revenue=51115.0 (32ms)
-[PASS] app 前端页面 · HTTP 200 · 20854 字符 (1ms)
-[PASS] mcp /health · tools=8 docs=8 (21ms)
-[PASS] mcp initialize · protocol=2025-06-18 (1ms)
-[PASS] mcp tools/call search_knowledge · 5 段 · top1=客诉处理手册 > 酒水异味或品质问题 (4ms)
-[PASS] mcp tools/call ask_storemind · intent=data 数据=store_sales 轨迹=6步 (39ms)
+[PASS] app /health（零依赖配置） · embed=hashing llm=none db=postgres/postgres docs=8 chunks=45 (6ms)
+[PASS] app /chat 规则题 · intent=policy 引用=5 答案=477字 (109ms)
+[PASS] app /chat 数据题 · tool=store_sales revenue=51115.0 (62ms)
+[PASS] app 前端页面 · HTTP 200 · 20854 字符 (2ms)
+[PASS] mcp /health · tools=8 docs=8 (28ms)
+[PASS] mcp initialize · protocol=2025-06-18 (2ms)
+[PASS] mcp tools/call search_knowledge · 5 段 · top1=客诉处理手册 > 酒水异味或品质问题 (8ms)
+[PASS] mcp tools/call ask_storemind · intent=data 数据=store_sales 轨迹=6步 (80ms)
 
 结果 8/8

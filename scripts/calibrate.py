@@ -17,12 +17,12 @@ if str(ROOT) not in sys.path:
 from app.config import settings  # noqa: E402
 from app.rag.embedder import build_embedder  # noqa: E402
 from app.rag.retriever import expand_query  # noqa: E402
-from app.rag.store import Store  # noqa: E402
+from app.rag.store import build_store  # noqa: E402
 
 cases = json.loads((ROOT / "eval" / "golden.json").read_text(encoding="utf-8"))
 
 settings.ensure_dirs()
-store = Store(settings.db_path)
+store = build_store(settings)
 embedder = build_embedder("hashing", ollama_base="", model="")
 
 rows = []
