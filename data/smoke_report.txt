@@ -8,13 +8,13 @@ GET  /docs/list -> 200  8 篇
   route: 规则信号: 疑问句式「能…吗」、疑问句式「需要…吗」
   trace: route           1ms  intent=policy conf=0.80 (规则信号: 疑问句式「能…吗」、疑问句式「需要…吗」)
   trace: query_data      0ms  规则意图，跳过结构化查询
-  trace: retrieve       35ms  召回 5 段 → 会员卡与储值规则 > 跨店使用 | 会员卡与储值规则 > 常见问题 | 会员卡与储值规则 > 卡类型
+  trace: retrieve      132ms  召回 5 段 → 会员卡与储值规则 > 跨店使用 | 会员卡与储值规则 > 常见问题 | 会员卡与储值规则 > 卡类型
   trace: merge           0ms  已有知识库召回，不回落
   trace: judge           0ms  top1 词面重合度 0.67，直接作答
-  trace: generate      827ms  llm=ollama chars=74
+  trace: generate      992ms  llm=ollama chars=79
   top1: 《会员卡与储值规则》 会员卡与储值规则 > 跨店使用  OK
   answer:
-    会员卡一般情况下可以跨店使用，但赠送金额不支持跨店，只能在开卡的原始门店消费。此外，企业协议卡仅限签约门店使用，闭店清算期间也不支持跨店消费。[1]
+    会员卡一般情况下可以跨店使用，但赠送金额不支持跨店，只能在开卡的原始门店消费。此外，企业协议卡仅限签约时约定的门店范围，且门店闭店清算期间暂停跨店消费。[1]
 
 ----------------------------------------------------------------------
 [policy] 客人说酒有异味怎么办
@@ -22,13 +22,13 @@ GET  /docs/list -> 200  8 篇
   route: 规则信号: 疑问词「怎么」
   trace: route           0ms  intent=policy conf=0.70 (规则信号: 疑问词「怎么」)
   trace: query_data      0ms  规则意图，跳过结构化查询
-  trace: retrieve       24ms  召回 5 段 → 客诉处理手册 > 酒水异味或品质问题 | 酒水知识与出品标准 > 关于酒水异味 | 酒水知识与出品标准 > 主要品类
+  trace: retrieve       50ms  召回 5 段 → 客诉处理手册 > 酒水异味或品质问题 | 酒水知识与出品标准 > 关于酒水异味 | 酒水知识与出品标准 > 主要品类
   trace: merge           0ms  已有知识库召回，不回落
-  trace: judge         266ms  模型判定资料充足
-  trace: generate      853ms  llm=ollama chars=106
+  trace: judge         323ms  模型判定资料充足
+  trace: generate      979ms  llm=ollama chars=113
   top1: 《客诉处理手册》 客诉处理手册 > 酒水异味或品质问题  OK
   answer:
-    先确认是原料问题还是出品问题，如果是同一瓶酒被多次反映，封存该瓶并报品控；如果是调制问题，则按出品失误处理，直接重做。[2] 如果客人出现身体不适，立即建议就医并保留就医凭证，当天上报区域运营，不得私下协商赔偿。
+    按照步骤处理：首先确认是原料问题还是出品问题，如果是同一瓶酒多次反映，封存该瓶并报品控；如果是调制问题，则按出品失误处理，直接重做。[2] 如果客人出现身体不适，立即建议就医并保留就医凭证，当天上报区域运营，不得私下协商赔偿。
 
 ----------------------------------------------------------------------
 [policy] 满减和折扣券能一起用吗
@@ -36,16 +36,16 @@ GET  /docs/list -> 200  8 篇
   route: 规则信号: 疑问句式「能…吗」、疑问句式「需要…吗」
   trace: route           0ms  intent=policy conf=0.80 (规则信号: 疑问句式「能…吗」、疑问句式「需要…吗」)
   trace: query_data      0ms  规则意图，跳过结构化查询
-  trace: retrieve       49ms  召回 5 段 → 活动核销规则 > 叠加规则 | 会员卡与储值规则 > 储值与赠送 | 会员卡与储值规则 > 跨店使用
+  trace: retrieve     2015ms  召回 5 段 → 活动核销规则 > 叠加规则 | 会员卡与储值规则 > 储值与赠送 | 会员卡与储值规则 > 跨店使用
   trace: merge           0ms  已有知识库召回，不回落
-  trace: judge         299ms  模型判定资料不足以回答；改写为「满减 折扣券 叠加规则」
-  trace: rewrite         0ms  第 1 次重查，检索词：满减 折扣券 叠加规则 满减和折扣券能一起用吗
-  trace: retrieve       28ms  召回 5 段 → 活动核销规则 > 叠加规则 | 会员卡与储值规则 > 储值与赠送 | 会员卡与储值规则 > 跨店使用
-  trace: judge           0ms  top1 词面重合度 0.64，直接作答
-  trace: generate      680ms  llm=ollama chars=58
+  trace: judge         429ms  模型判定资料不足以回答；改写为「满减券 折扣券 叠加规则」
+  trace: rewrite         0ms  第 1 次重查，检索词：满减券 折扣券 叠加规则 满减和折扣券能一起用吗
+  trace: retrieve     4413ms  召回 5 段 → 活动核销规则 > 叠加规则 | 会员卡与储值规则 > 储值与赠送 | 会员卡与储值规则 > 跨店使用
+  trace: judge           0ms  top1 词面重合度 0.66，直接作答
+  trace: generate      839ms  llm=ollama chars=57
   top1: 《活动核销规则》 活动核销规则 > 叠加规则  OK
   answer:
-    满减券与折扣券不能叠加，同一订单只能选择其一，系统会自动选择对客人更有利的一种，但需要服务员在结账前口头确认。[1]
+    满减券与折扣券不能叠加，同一订单只能选择其一，系统会自动选择对客人更有利的一种，需要服务员在结账前口头确认。[1]
 
 ----------------------------------------------------------------------
 [data] 上周广州天河店卖了多少
@@ -53,10 +53,10 @@ GET  /docs/list -> 200  8 篇
   route: 数据信号: 数量提问、时间范围
   trace: route           0ms  intent=data conf=0.80 (数据信号: 数量提问、时间范围)
   trace: retrieve        0ms  数据意图，跳过知识库
-  trace: query_data      8ms  工具=store_sales store=广州天河店 period=last_7d ok=True
+  trace: query_data      7ms  工具=store_sales store=广州天河店 period=last_7d ok=True
   trace: merge           0ms  工具已返回数据，不回落
   trace: judge           0ms  工具已返回数据，无需额外检索
-  trace: generate      310ms  llm=ollama chars=24
+  trace: generate      343ms  llm=ollama chars=24
   tool: store_sales ok=True {'store': '广州天河店', 'orders': 241, 'revenue': 51115.0, 'avg_ticket': 212.1}
   answer:
     上周广州天河店的营业额是51115.0。[D1]
@@ -70,7 +70,7 @@ GET  /docs/list -> 200  8 篇
   trace: query_data      7ms  工具=inventory_alert store=广州天河店 period=last_7d ok=True
   trace: merge           0ms  工具已返回数据，不回落
   trace: judge           0ms  工具已返回数据，无需额外检索
-  trace: generate      536ms  llm=ollama chars=44
+  trace: generate      603ms  llm=ollama chars=44
   tool: inventory_alert ok=True [{'store': '广州天河店', 'item_name': '莫吉托', 'qty': 6, 'unit': '份'}, {'store': '广州天河店', 'item_name': '格兰菲迪12年', 'qty': 9, 'unit': '瓶'}]
   answer:
     广州天河店库存告急的品项有莫吉托和格兰菲迪12年，分别缺货6份和9瓶。[D1] [D2]

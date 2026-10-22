@@ -52,18 +52,18 @@ python scripts/mcp_smoke_test.py            # 协议冒烟，14/14
 python scripts/workflow_test.py             # 工作流：提案/确认/越权/幂等/审计，9/9
 ```
 
-**Docker（postgres + app + MCP 一起起）**：
+**Docker（ollama + postgres + app + MCP 一起起）**：
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d --build
-python scripts/verify_docker.py             # 部署验证，10/10
+python scripts/verify_docker.py --expect-embed ollama --expect-llm ollama
 ```
 
-默认 PG（pgvector）+ hashing + none。运行时**没有 SQLite 回退**，本地跑脚本也要先起
-compose 里的 postgres。接宿主机 ollama 时在 compose 前设
-`SM_EMBED_BACKEND=ollama SM_LLM_BACKEND=ollama SM_EMBED_DIM=1024`，见 README「方式三」。
+模型也在 compose 里：`ollama-import` 先从宿主机 `~/.ollama/models` 导入，`ollama-pull`
+补齐缺失模型，app/mcp 走 `http://ollama:11434`。宿主端口映射 `11435`，本地脚本的
+`.env` 指向它。宿主机的 `OllamaServe` 计划任务已禁用，不要再起宿主 ollama（会抢 GPU）。
 
-**打开 `http://127.0.0.1:8121/` 是可以直接对话的网页**，
+**打开 `http://127.0.0.1:8000/` 是可以直接对话的网页**，
 `/docs` 是 FastAPI 自动生成的接口文档。
 
 ### 四个验证命令（改完代码必须跑）
@@ -102,10 +102,10 @@ python scripts/mcp_smoke_test.py          # MCP 协议冒烟，14 项；加 --ze
 | 依赖 | 版本 | 位置 |
 |---|---|---|
 | Python | 3.13.14 | `storemind/.venv`（已建好，别重建） |
-| ollama | 0.40.8 | scoop，**主包只有 CLI，daemon 要 `extras/ollama-full`** |
-| bge-m3 | 1.2GB / 1024 维 | 已 pull |
-| qwen2.5:7b | 4.7GB | 已 pull |
-| qwen3:4b | 2.5GB | 已 pull（**不要用它生成**，见第 6 节） |
+| ollama | 容器 `ollama/ollama` | 容器内 11434，宿主 11435；宿主计划任务已禁用 |
+| bge-m3 | 1.2GB / 1024 维 | 已导入容器卷 |
+| qwen2.5:7b | 4.7GB | 已导入容器卷 |
+| qwen3:4b | 2.5GB | 已导入容器卷（**不要用它生成**，见第 6 节） |
 | GPU | RTX 5060 8GB | 架构 sm_120，ollama 官方支持 |
 | Docker | 29.9.2 / Desktop 4.96.1 | WSL2 后端，`hypervisorlaunchtype=Auto` |
 | PostgreSQL | 17 + pgvector | 容器 `pgvector/pgvector:pg17`，宿主端口 5433 |
@@ -348,7 +348,7 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 | 优先 | 事项 | 为什么 | 预估 |
 |---|---|---|---|
 | **P0** | **MCP server（自己写协议实现）** | ✅ 2026-10-22 已完成：13 个工具 + 语料资源，stdio/HTTP，协议冒烟 14/14 | 半天 |
-| **P0** | **Docker 化 + 部署 + 录 3 分钟屏** | ✅ 2026-10-22 Docker 部分完成：PG + app + MCP，部署验证 10/10；**录屏还没做** | 1 天 |
+| **P0** | **Docker 化 + 部署 + 录 3 分钟屏** | ✅ 2026-10-22 Docker 部分完成：ollama + PG + app + MCP 全在 compose，部署验证 10/10；**录屏还没做** | 1 天 |
 | **P1** | **可执行工作流（受控写操作）** | ✅ 2026-10-22 已完成：客诉工单/补货，提案→确认→审计，角色/幂等，测试 9/9 | 半天 |
 | **P1** | **PostgreSQL + pgvector** | ✅ 2026-10-22 已完成：HNSW，全栈 PG（知识库/经营数据/工作流/checkpoint）；45 chunk 单次检索约 60ms（别宣传成性能提升） | 半天 |
 | **P0** | **改简历** | **10.27 死线**，代码再好简历上只有一行字也白搭 | 半天 |
@@ -453,6 +453,8 @@ Deserializing unregistered type app.rag.store.Hit from checkpoint.
 - ❌ 别删 `scripts/mcp_smoke_test.py` 和 `data/mcp_report*.txt`——MCP 是自己写的协议，
       这两份报告是「协议实现正确」的唯一证据
 - ❌ 别删 `scripts/verify_docker.py` 和 `data/docker_verify*.txt`——Docker 部署的唯一实测证据
+- ❌ 别起宿主 ollama——模型已经在 compose 的 `ollama` 服务里，两个会抢 GPU/内存
+- ❌ 别把 `ollama-import` / `ollama-pull` 删了——前者从宿主缓存导入，后者补缺；删了新机器首次启动没模型
 - ❌ 别把 PostgreSQL 换回 SQLite——运行时只有 PG，checkpoint 也在 PG
 - ❌ 别删 `app/rag/pg_store.py` / `app/tools/pg_ops.py` / `app/workflow/`——存储和工作流的唯一实现
 - ❌ 别把 `pgvector_init.sql` 重新挂到 `/docker-entrypoint-initdb.d`——会和 PgStore 抢 schema，见 6.13

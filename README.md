@@ -31,9 +31,9 @@
 
 ## 快速开始
 
-### 方式一：全本地（推荐，零云 API 依赖）
+### 方式一：本地 Python + 宿主机 ollama（不使用 Docker）
 
-需要一块 GPU（8GB 显存即可）和 ollama：
+需要一块 GPU（8GB 显存即可）和宿主机 ollama：
 
 ```bash
 # 1. 装 ollama 并起服务
@@ -57,46 +57,49 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 打开 **`http://127.0.0.1:8000/`** 是可以直接对话的页面。或者 `http://127.0.0.1:8000/docs` 看接口。
+> 当前默认部署是下面的 Docker（模型也在容器里）；宿主机 ollama 计划任务已禁用。
+> 要走这条本地路径，需要手动起 `ollama serve`，并把 `.env` 的 `SM_OLLAMA_BASE` 改回 11434。
 
-### 方式二：本地 Python（复用 Docker 里的 PostgreSQL）
+### 方式二：本地 Python（复用 Docker 里的 PostgreSQL 和 ollama）
 
-运行时只有一个存储后端：PostgreSQL + pgvector。先起数据库：
+运行时只有 PostgreSQL 一个存储后端。先用 compose 起数据库和模型（不启动 app/mcp，避免占 8000）：
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d postgres
+docker compose -f deploy/docker-compose.yml up -d postgres ollama ollama-import ollama-pull
 pip install -r requirements.txt
 python scripts/seed_ops_db.py
 python scripts/build_index.py --rebuild
 uvicorn app.main:app --reload --port 8000
 ```
 
-不想拉模型时，把 `SM_EMBED_BACKEND=hashing`、`SM_LLM_BACKEND=none`：
+`.env` 里的 `SM_OLLAMA_BASE` 指向 `http://127.0.0.1:11435`（容器的宿主映射）。
+不想用模型时，把 `SM_EMBED_BACKEND=hashing`、`SM_LLM_BACKEND=none`：
 仍然需要 PostgreSQL（compose 提供），但不需要 GPU 和 ollama。
 
-### 方式三：Docker（不装 Python、不需要模型）
+### 方式三：Docker（推荐，模型也在里面）
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d --build
 # 网页 http://127.0.0.1:8000/ · MCP http://127.0.0.1:8765/mcp
 
-python scripts/verify_docker.py      # 部署验证 10/10
+python scripts/verify_docker.py --expect-embed ollama --expect-llm ollama   # 10/10
 ```
 
-默认是零依赖模式（`hashing + none`）：镜像自带 8 篇语料，启动时自动建经营库和索引，
-不需要 GPU、不需要宿主机 ollama。**存储固定 PostgreSQL + pgvector**（compose 会起
-postgres 服务并等它健康）；没有 SQLite 回退路径。要接宿主机上的 ollama（答案质量更好）：
+默认起 ollama 并导入/补齐模型（`ollama-import` / `ollama-pull`）；首次需要 Docker Hub 网络。
+**存储固定 PostgreSQL + pgvector**（compose 会起 postgres 服务并等它健康）；没有 SQLite 回退路径。
+
+无模型模式（不调用 ollama，但 PG 仍要起）：
 
 ```powershell
-# PowerShell
-$env:SM_EMBED_BACKEND="ollama"; $env:SM_LLM_BACKEND="ollama"
-docker compose -f deploy/docker-compose.yml up -d --wait
-python scripts/verify_docker.py --expect-embed ollama --expect-llm ollama
+$env:SM_EMBED_BACKEND="hashing"; $env:SM_EMBED_DIM="512"; $env:SM_LLM_BACKEND="none"
+docker compose -f deploy/docker-compose.yml up -d --force-recreate --wait
+python scripts/verify_docker.py --expect-embed hashing --expect-llm none
 ```
 
 ```bash
 # bash
-SM_EMBED_BACKEND=ollama SM_LLM_BACKEND=ollama \
-  docker compose -f deploy/docker-compose.yml up -d --wait
+SM_EMBED_BACKEND=hashing SM_EMBED_DIM=512 SM_LLM_BACKEND=none \
+  docker compose -f deploy/docker-compose.yml up -d --force-recreate --wait
 ```
 
 本机实测（Docker 29.9.2，镜像 334MB，`scripts/verify_docker.py` 可复现）：
@@ -104,36 +107,39 @@ SM_EMBED_BACKEND=ollama SM_LLM_BACKEND=ollama \
 | 配置 | /health | 规则题 | 数据题 | MCP |
 |---|---|---|---|---|
 | hashing + none（PG） | db=postgres docs=8 chunks=45 | 引用 5 段，抽取式 477 字 | `store_sales` revenue=51115.0 | 10/10 |
-| ollama + qwen2.5:7b（PG） | db=postgres docs=8 chunks=45 | 引用 5 段，生成 42 字，首次 0.72s | `store_sales` revenue=51115.0 | 10/10 |
+| ollama + qwen2.5:7b（PG） | db=postgres docs=8 chunks=45 | 引用 5 段，生成 75 字，首次 0.93s | `store_sales` revenue=51115.0 | 10/10 |
 
 两个实现细节：
 
-- 容器数据用命名卷 `deploy_storemind-data`，不挂宿主机 `data/`——本地开发用 bge-m3 索引，
-  容器默认 hashing，混用会互相覆盖嵌入器签名（见第 8 条设计决策）。
+- 业务数据、工作流、checkpoint 全在 PG；容器只读挂载 `corpus/`，不挂宿主机 `data/`。
 - `mcp` 服务等 `app` 健康后再启动，避免两个进程同时初始化数据库。
 
 > Docker Desktop 需要 WSL2，且 `bcdedit` 的 `hypervisorlaunchtype` 必须是 `auto`。
 > 本机安装时踩过 `no virtualization available`，记录在 HANDOVER 6.11。
 
-### 把 Ollama 也放进 Docker
+### 把 Ollama 也放进 Docker（默认）
+
+主 compose 已经包含模型服务，`docker compose up -d` 会按顺序：
+
+1. `ollama-import`：从宿主机 `~/.ollama/models` 导入已有模型到命名卷（一次性，已有 `.imported` 标记则跳过）
+2. `ollama`：启动 Ollama，容器内 `11434`，宿主映射 `11435` 供本地脚本调试
+3. `ollama-pull`：补齐缺失的 `bge-m3` / `qwen2.5:7b`；拉取失败不阻塞整栈
+4. `app` / `mcp`：使用 `http://ollama:11434`，建索引并启动
 
 Docker 的服务名/容器名只允许 ASCII（`[a-zA-Z0-9][a-zA-Z0-9_.-]`），所以底层服务名仍是
-`app` / `mcp` / `postgres` / `ollama`；每个容器加了中文 label，配一个中文快捷脚本：
+`ollama` / `ollama-import` / `ollama-pull` / `app` / `mcp` / `postgres`；
+每个容器加了中文 label，配一个中文快捷脚本：
 
 ```powershell
-.\scripts\docker.ps1 启动        # PG + 应用 + 接口（hashing + none，不拉模型）
-.\scripts\docker.ps1 启动模型    # 额外起 ollama，并拉 bge-m3 / qwen2.5:7b
-.\scripts\docker.ps1 状态        # 中文 label：应用 / 接口 / 数据库 / 模型
+.\scripts\docker.ps1 启动        # 起全部（含模型；缺失时自动拉）
+.\scripts\docker.ps1 重新构建    # 改了代码后重建 app 镜像
+.\scripts\docker.ps1 状态        # 中文 label：应用 / 接口 / 数据库 / 模型 / 模型导入 / 模型拉取
 .\scripts\docker.ps1 日志 应用
 .\scripts\docker.ps1 停止
 ```
 
-模型服务用 `deploy/docker-compose.ollama.yml` 叠加：
-
-- 容器内地址 `http://ollama:11434`，宿主端口 `11435`（避免和宿主机已有 ollama 冲突）
-- 模型放在命名卷 `ollama-models`，首次拉取约 6GB，之后复用
-- `ollama-init` 是 one-shot 服务，拉完 `bge-m3` 和 `qwen2.5:7b` 后 app 才启动
-- 需要 Docker Desktop 的代理能访问 Docker Hub；GPU 支持时可在 override 里打开 `gpus: all`
+宿主机上的 ollama 计划任务已禁用；本地跑评估脚本时 `.env` 指向 `127.0.0.1:11435`（容器映射端口）。
+需要无模型模式时，用 `SM_EMBED_BACKEND=hashing SM_EMBED_DIM=512 SM_LLM_BACKEND=none` 重建 app。
 
 ### 命令行
 
@@ -644,7 +650,7 @@ scripts/
   dump_chunks.py       导出语料切片结果，定位某句话落在哪一段
   dump_judge.py        导出 judge 模型的原始输出，查解析失败
   setup_local.bat      一键起 ollama + 拉模型 + 建索引
-deploy/                docker-compose（PG + app + MCP）、ollama override 与 pgvector schema
+deploy/                docker-compose（ollama + PG + app + MCP）与 pgvector schema
 mcp.example.json       MCP 客户端配置示例
 ```
 

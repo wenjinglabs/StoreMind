@@ -98,8 +98,14 @@ def hybrid_search(store: PgStore, embedder, query: str, *, top_k: int = 5,
         # 降到 0.15 保留一点同义改写的语义信号，但让字面匹配主导。
         # 换 bge-m3 之后这个值要回到 1.0 并重新跑评估集——这是待验事项，不是定论。
         vector_weight = 0.15 if getattr(embedder, "name", "") == "hashing" else 1.0
-    qv = embedder.embed_one(q_expanded)
-    vec_hits = store.vector_search(qv, vector_k)
+    qv = None
+    try:
+        qv = embedder.embed_one(q_expanded)
+    except Exception:
+        # 嵌入服务不可用时不能让整条问答 500：BM25 仍然能工作。
+        # 这是有意的降级，不是静默失败——trace 里会看到 vector 路为空。
+        qv = None
+    vec_hits = store.vector_search(qv, vector_k) if qv else []
     bm_hits = store.bm25_search(q_expanded, bm25_k)
     fused = rrf_fuse([vec_hits, bm_hits], k=rrf_k, weights=[vector_weight, 1.0])
     for h in fused:
@@ -111,14 +117,18 @@ def hybrid_search(store: PgStore, embedder, query: str, *, top_k: int = 5,
 def debug_search(store: PgStore, embedder, query: str, k: int = 5) -> dict:
     """诊断用：分别看两路召回，定位是哪一路把正确结果丢了。"""
     q_expanded = expand_query(query)
-    qv = embedder.embed_one(q_expanded)
+    try:
+        qv = embedder.embed_one(q_expanded)
+        vector = [
+            {"section": h.section_path, "score": round(h.score, 5)}
+            for h in store.vector_search(qv, k)
+        ]
+    except Exception:
+        vector = []
     return {
         "query": query,
         "expanded": q_expanded,
-        "vector": [
-            {"section": h.section_path, "score": round(h.score, 5)}
-            for h in store.vector_search(qv, k)
-        ],
+        "vector": vector,
         "bm25": [
             {"section": h.section_path, "score": round(h.score, 5)}
             for h in store.bm25_search(q_expanded, k)
