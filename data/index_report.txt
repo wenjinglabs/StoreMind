@@ -1,4 +1,4 @@
-corpus      : <项目路径>\corpus
+corpus      : <project>/corpus
 embedder    : hashing (dim=512)
 chunk 参数  : 200~450 字, overlap 60
 新索引文档  : 8
